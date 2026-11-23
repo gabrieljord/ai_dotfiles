@@ -163,30 +163,36 @@ fi
 # ------------------------------------------------------------------------------
 # 4. Context Resolution & Vocabulary Mapping
 # ------------------------------------------------------------------------------
-# Normalize extension: strip leading dot, lowercase, and resolve common aliases
-CLEAN_EXT="$(echo "$TARGET_EXT" | sed 's/^\.//' | tr '[:upper:]' '[:lower:]')"
+# Normalize extension / language string: strip leading dot
+RAW_EXT="$(echo "$TARGET_EXT" | sed 's/^\.//')"
+CLEAN_EXT="$(echo "$RAW_EXT" | tr '[:upper:]' '[:lower:]')"
 
-case "$CLEAN_EXT" in
-    python) CLEAN_EXT="py" ;;
-    rust) CLEAN_EXT="rs" ;;
-    typescript) CLEAN_EXT="ts" ;;
-    javascript) CLEAN_EXT="js" ;;
-    golang) CLEAN_EXT="go" ;;
-    shell|bash|zsh) CLEAN_EXT="sh" ;;
-    c++) CLEAN_EXT="cpp" ;;
-    markdown) CLEAN_EXT="md" ;;
-esac
+# Sanitize into standard uppercase POSIX identifier consistent with lang_prompts.env
+SAN_EXT="$(echo "$RAW_EXT" \
+    | sed -e 's/c++/cpp/g' -e 's/C++/CPP/g' \
+          -e 's/c#/cs/g'   -e 's/C#/CS/g' \
+          -e 's/f#/fs/g'   -e 's/F#/FS/g' \
+          -e 's/q#/qs/g'   -e 's/Q#/QS/g' \
+          -e 's/1c/one_c/g' -e 's/1C/ONE_C/g' \
+          -e 's/4d/four_d/g' -e 's/4D/FOUR_D/g' \
+          -e 's/+/_p_/g'   -e 's/#/_s_/g' \
+          -e 's/[^a-zA-Z0-9_]/_/g' \
+          -e 's/__*/_/g'   -e 's/^_//' -e 's/_$//' \
+    | tr '[:lower:]' '[:upper:]')"
 
-UPPER_EXT="$(echo "$CLEAN_EXT" | tr '[:lower:]' '[:upper:]')"
-VOCAB_VAR_NAME="PROMPT_${UPPER_EXT}"
+if [[ "$SAN_EXT" =~ ^[0-9] ]]; then
+    SAN_EXT="LANG_${SAN_EXT}"
+fi
 
-# Dynamic variable lookup: ${!VAR} resolves the value of PROMPT_<EXT>
+VOCAB_VAR_NAME="PROMPT_${SAN_EXT}"
+
+# Dynamic variable lookup: ${!VAR} resolves the value of PROMPT_<EXT_OR_LANG>
 if [[ -n "${!VOCAB_VAR_NAME:-}" ]]; then
     VOCAB_PROMPT="${!VOCAB_VAR_NAME}"
-    log_info "Active context: [${CLEAN_EXT}] (Injected ${#VOCAB_PROMPT} chars of domain vocabulary)"
+    log_info "Active context: [${CLEAN_EXT}] -> \${${VOCAB_VAR_NAME}} (Injected ${#VOCAB_PROMPT} chars of domain vocabulary)"
 else
     VOCAB_PROMPT="${PROMPT_DEFAULT:-code, function, variable, parameter, return}"
-    log_warn "No prompt mapping found for extension '${CLEAN_EXT}'. Using generic default vocabulary."
+    log_warn "No prompt mapping found for extension '${CLEAN_EXT}' (\${${VOCAB_VAR_NAME}}). Using generic default vocabulary."
 fi
 
 # ------------------------------------------------------------------------------

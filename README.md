@@ -45,6 +45,7 @@ ai_dotfiles/
 ├── install.sh                 # Safe, idempotent bootstrap installer & link manager
 ├── README.md                  # System documentation & setup guide
 ├── whisper -> config/whisper  # Root symlink for grammar & config discovery
+├── prompts -> config/prompts  # Root symlink for language prompts discovery
 ├── config/
 │   ├── whisper/
 │   │   ├── whisper.conf       # Audio parameters, thread counts, and model profiles
@@ -52,7 +53,7 @@ ai_dotfiles/
 │   │       ├── code_talker.md # Casing styles, operators, punctuation, control flow
 │   │       └── boilerplate.md # Macros: dates (american date today), templates, git
 │   ├── prompts/
-│   │   └── lang_prompts.env   # Extension-to-Whisper initial_prompt vocabulary mappings
+│   │   └── lang_prompts.env   # 595 languages & 1,840+ extension/alias Whisper prompts
 │   ├── ollama/
 │   │   ├── Modelfile.prompt-optimizer  # Custom Modelfile for prompt structuring
 │   │   └── system-prompts/
@@ -65,7 +66,9 @@ ai_dotfiles/
 │   ├── pipeline/
 │   │   └── transcribe_and_optimize.sh # General dictation & clipboard/auto-paste runner
 │   └── setup/
-│       └── setup_whisper_cpp.sh       # Automated build & model downloader
+│       ├── setup_whisper_cpp.sh       # Automated build & model downloader
+│       ├── generate_lang_prompts.py   # Regenerates lang_prompts.env from Linguist
+│       └── languages.yml              # Canonical GitHub Linguist language specs
 └── systemd/
     └── whisper-server.service.example # Systemd unit file for headless home servers
 ```
@@ -75,17 +78,50 @@ ai_dotfiles/
 ## Dynamic Context & Spoken Grammars
 
 ### 1. Language-Specific Vocabulary Biasing (`config/prompts/lang_prompts.env`)
-Whisper's initial prompt (`-p` / `--prompt`) biases acoustic token probabilities towards programming jargon and symbols. When editing a file in Cursor or VS Code, the extension is detected and the appropriate domain vocabulary is automatically injected:
+Whisper's initial prompt (`-p` / `--prompt`) biases acoustic token probabilities towards programming jargon and symbols. When editing a file in Cursor or VS Code, the extension is detected and the appropriate domain vocabulary is automatically injected.
 
-- **Python (`py`)**: `PROMPT_PY="Python, async, await, def, dict, list, tuple, snake_case, kwargs..."`
-- **Rust (`rs`)**: `PROMPT_RS="Rust, fn, mut, impl, struct, enum, Result, Option, match, Vec..."`
-- **TypeScript (`ts`/`tsx`)**: `PROMPT_TS="TypeScript, interface, type, const, async, await, Promise..."`
-- **Go (`go`)**: `PROMPT_GO="Go, golang, func, package, struct, interface, chan, defer..."`
+`config/prompts/lang_prompts.env` provides comprehensive coverage for **all 573 programming languages known to GitHub Linguist** (plus key markup and query languages—595 languages and 1,840+ extension/alias mappings in total). Sourced in under 20ms.
+
+- **Python (`py`, `python`)**: `PROMPT_PY="Python, async, await, def, dict, list, tuple, snake_case, kwargs..."`
+- **Rust (`rs`, `rust`)**: `PROMPT_RS="Rust, fn, mut, impl, struct, enum, Result, Option, match, Vec..."`
+- **TypeScript (`ts`, `tsx`)**: `PROMPT_TS="TypeScript, interface, type, const, async, await, Promise..."`
+- **C / C++ (`c`, `cpp`, `c++`)**: `PROMPT_CPP="C++, cpp, std, vector, auto, template, typename, class..."`
+- **C# (`cs`, `c#`)**: `PROMPT_CS="C#, csharp, class, struct, interface, enum, record, namespace, using..."`
+- **Zig (`zig`, `zon`)**: `PROMPT_ZIG="Zig, fn, pub, const, var, struct, enum, union, error, try, catch..."`
+- **Gleam (`gleam`)**: `PROMPT_GLEAM="Gleam, pub, fn, let, assert, type, opaque, case, of, import..."`
+- **Solidity (`sol`, `solidity`)**: `PROMPT_SOL="Solidity, pragma, contract, interface, function, public, private..."`
+- **Full Spectrum**: Covers Ada, COBOL, Fortran, Haskell, OCaml, Clojure, Elixir, Julia, R, Lua, PowerShell, SQL, and 500+ more.
 - **Fallback**: Unrecognized extensions fall back to `PROMPT_DEFAULT` gracefully.
 
 ### 2. Spoken Grammars (`whisper/grammars/*.md`)
-Grammars dictate how spoken words translate to syntax and boilerplate:
-- **Punctuation & Operators**:
+Grammars dictate how spoken words translate to syntax, boilerplate, and keywords:
+- **Sci-Fi Single-Syllable Codex (`whisper/grammars/scifi_lexicon.md`)**:
+  - Maps **all 1,392 distinct words** from `config/prompts/lang_prompts.env` to strictly single-syllable sci-fi/cybernetic codewords to eliminate recognition slur and speech fatigue during dictation.
+  - `test` $\rightarrow$ `if`
+  - `shift` $\rightarrow$ `else`
+  - `spin` $\rightarrow$ `for`
+  - `hold` $\rightarrow$ `while` / `await`
+  - `yield` $\rightarrow$ `return`
+  - `core` $\rightarrow$ `function` / `def`
+  - `spark` $\rightarrow$ `fn` / `lambda`
+  - `flux` $\rightarrow$ `var` / mutable
+  - `lock` $\rightarrow$ `const` / immutable
+  - `bind` $\rightarrow$ `let`
+  - `sync` $\rightarrow$ `async`
+  - `dock` $\rightarrow$ `import` / `use`
+  - `ship` $\rightarrow$ `export`
+  - `strand` $\rightarrow$ `string` / `str`
+  - `count` $\rightarrow$ `int` / integer
+  - `drift` $\rightarrow$ `float` / double
+  - `bit` $\rightarrow$ `bool` / boolean
+  - `pulse` $\rightarrow$ `true`
+  - `dead` $\rightarrow$ `false`
+  - `void` $\rightarrow$ `void` / `null` / `None`
+  - `hull` $\rightarrow$ `struct`
+  - `clan` $\rightarrow$ `class`
+  - `port` $\rightarrow$ `interface`
+  - Regenerable via `scripts/setup/generate_scifi_grammar.py`; machine-readable lookup at `whisper/grammars/scifi_lexicon.json`.
+- **Punctuation & Operators (`code_talker.md`)**:
   - `arrow func` / `fat arrow` $\rightarrow$ `=>`
   - `thin arrow` / `returns` $\rightarrow$ `->`
   - `equals equals` $\rightarrow$ `==` (or `===` in JS/TS)
@@ -97,7 +133,7 @@ Grammars dictate how spoken words translate to syntax and boilerplate:
   - `camel case fetch customer data` $\rightarrow$ `fetchCustomerData`
   - `pascal case auth token provider` $\rightarrow$ `AuthTokenProvider`
   - `constant case max retries` $\rightarrow$ `MAX_RETRIES`
-- **Temporal & Boilerplate Macros**:
+- **Temporal & Boilerplate Macros (`boilerplate.md`)**:
   - `american date today` $\rightarrow$ current date in `MM/DD/YYYY` (e.g. `11/23/2026`)
   - `iso date today` $\rightarrow$ current date in `YYYY-MM-DD`
   - `shebang bash` $\rightarrow$ `#!/usr/bin/env bash\nset -euo pipefail`

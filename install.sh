@@ -198,7 +198,12 @@ create_symlink() {
 # 1. Link modular config directory
 create_symlink "${CONFIG_SOURCE_DIR}" "${TARGET_CONFIG_DIR}"
 
-# 2. Link root .env to config directory for easy discovery by daemon/scripts
+# 2. Ensure convenience symlinks at repo root
+ln -sfn config/whisper "${SCRIPT_DIR}/whisper"
+ln -sfn config/prompts "${SCRIPT_DIR}/prompts"
+ln -sfn grammars "${SCRIPT_DIR}/config/whisper/grammers"
+
+# 3. Link root .env to config directory for easy discovery by daemon/scripts
 create_symlink "${ENV_TARGET}" "${TARGET_CONFIG_DIR}/.env"
 
 # 3. Symlink pipeline runner scripts to ~/.local/bin
