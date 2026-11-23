@@ -1,0 +1,21 @@
+# Git ignore rules for ai_dotfiles
+.env
+.env.local
+*.log
+*.tmp
+*.wav
+*.mp3
+
+# Build & Model Artifacts
+models/
+whisper.cpp/
+*.bin
+*.gguf
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/

@@ -1,0 +1,20 @@
+[Unit]
+Description=Whisper.cpp Streaming Speech-to-Text Server
+After=network.target
+
+[Service]
+Type=simple
+User=%I
+EnvironmentFile=-%h/.config/ai_dotfiles/.env
+ExecStart=%h/.local/bin/whisper-server \
+    --model %h/.local/share/whisper.cpp/models/ggml-large-v3-turbo.bin \
+    --port 8178 \
+    --host 0.0.0.0 \
+    --threads 4 \
+    --gpu-layers 0 \
+    --convert
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
