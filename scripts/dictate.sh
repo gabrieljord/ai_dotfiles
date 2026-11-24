@@ -106,10 +106,26 @@ LLM_ENDPOINT="${LOCAL_LLM_ENDPOINT:-http://localhost:11434}"
 LLM_MODEL="${LLM_MODEL_NAME:-prompt-optimizer:latest}"
 LLM_TIMEOUT="${LLM_TIMEOUT_SECONDS:-15}"
 
+COLOR_GREEN="\033[1;32m"
+COLOR_RED="\033[1;31m"
+COLOR_YELLOW="\033[1;33m"
+COLOR_CYAN="\033[1;36m"
+COLOR_BOLD="\033[1m"
+COLOR_RESET="\033[0m"
+
 # Diagnostic helper: all status/errors written to stderr
 log_err()  { printf "[dictate] ERROR: %s\n" "$*" >&2; }
 log_warn() { printf "[dictate] WARN: %s\n" "$*" >&2; }
 log_info() { printf "[dictate] INFO: %s\n" "$*" >&2; }
+log_wake_success() {
+    printf "  ${COLOR_GREEN}✔${COLOR_RESET} ${COLOR_BOLD}[dictate]${COLOR_RESET} Wake word ${COLOR_CYAN}\"%s\"${COLOR_RESET} detected — ${COLOR_GREEN}${COLOR_BOLD}LISTENING${COLOR_RESET}\n" "$*" >&2
+}
+log_wake_fail() {
+    printf "  ${COLOR_RED}✖${COLOR_RESET} ${COLOR_BOLD}[dictate]${COLOR_RESET} Wake word ${COLOR_CYAN}\"%s\"${COLOR_RESET} not detected — ${COLOR_RED}${COLOR_BOLD}NOT LISTENING${COLOR_RESET}\n" "$*" >&2
+}
+log_no_speech() {
+    printf "  ${COLOR_RED}✖${COLOR_RESET} ${COLOR_BOLD}[dictate]${COLOR_RESET} No speech detected — ${COLOR_RED}${COLOR_BOLD}NOT LISTENING${COLOR_RESET}\n" >&2
+}
 
 # ------------------------------------------------------------------------------
 # 3. CLI Argument Parsing
@@ -173,6 +189,7 @@ EOF
 # Parse options
 POSITIONAL_ARGS=()
 FLAG_RECORD=false
+CUSTOM_AUDIO_SPECIFIED=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -e|--ext)
@@ -181,6 +198,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         -a|--audio)
             AUDIO_FILE="$2"
+            CUSTOM_AUDIO_SPECIFIED=true
             shift 2
             ;;
         --record)
@@ -225,6 +243,7 @@ fi
 
 if [[ -z "$AUDIO_FILE" && ${#POSITIONAL_ARGS[@]} -ge 2 ]]; then
     AUDIO_FILE="${POSITIONAL_ARGS[1]}"
+    CUSTOM_AUDIO_SPECIFIED=true
 elif [[ -z "$AUDIO_FILE" ]]; then
     AUDIO_FILE="$DEFAULT_AUDIO"
 fi
@@ -280,33 +299,33 @@ if [[ -n "$RAW_TEXT_OVERRIDE" ]]; then
     RAW_TRANSCRIPT="$RAW_TEXT_OVERRIDE"
     log_info "Using raw text override: \"${RAW_TRANSCRIPT}\""
 else
-    # Check if audio recording is requested or default audio file does not exist
+    # If no custom audio file was passed, record fresh audio from microphone
     RECORD_SCRIPT="${SCRIPT_DIR}/audio/record_until_silence.py"
-    if [[ "$FLAG_RECORD" == "true" || (! -f "$AUDIO_FILE" && "$AUDIO_FILE" == "$DEFAULT_AUDIO") ]]; then
+    if [[ "$CUSTOM_AUDIO_SPECIFIED" == "false" || "$FLAG_RECORD" == "true" ]]; then
         if [[ -f "$RECORD_SCRIPT" ]] && command -v python3 &>/dev/null; then
-            log_info "Recording audio from microphone until silence..."
-            python3 "$RECORD_SCRIPT" \
+            # Clean up stale audio file before recording
+            rm -f "$AUDIO_FILE"
+
+            if ! python3 "$RECORD_SCRIPT" \
                 --output "$AUDIO_FILE" \
-                --silence-duration "${AUDIO_SILENCE_DURATION:-1.2}" \
+                --silence-duration "${AUDIO_SILENCE_DURATION:-5.0}" \
                 --threshold "${AUDIO_SILENCE_THRESHOLD:-2.0%}" \
                 --sample-rate "${AUDIO_SAMPLE_RATE:-16000}" \
-                --wait-timeout "${AUDIO_WAIT_TIMEOUT:-20.0}" \
+                --wait-timeout "${AUDIO_LISTEN_TIMEOUT:-${LISTEN_TIMEOUT:-${AUDIO_WAIT_TIMEOUT:-30.0}}}" \
                 --max-duration "${AUDIO_MAX_DURATION:-120.0}" \
                 --backend "${AUDIO_RECORDER:-auto}" \
                 --device "${AUDIO_DEVICE:-default}" \
-                --prefix "[dictate] " >&2
+                --prefix "[dictate] " >&2; then
+                log_no_speech
+                exit 0
+            fi
         fi
     fi
 
-    # Verify audio file existence
-    if [[ ! -f "$AUDIO_FILE" ]]; then
-        log_err "Audio file not found: ${AUDIO_FILE}"
-        exit 1
-    fi
-
-    if [[ ! -s "$AUDIO_FILE" ]]; then
-        log_err "Audio file is empty (0 bytes): ${AUDIO_FILE}"
-        exit 1
+    # Verify audio file existence and non-empty
+    if [[ ! -f "$AUDIO_FILE" || ! -s "$AUDIO_FILE" ]]; then
+        log_no_speech
+        exit 0
     fi
 
     # Verify whisper binary
@@ -353,7 +372,7 @@ else
 fi
 
 if [[ -z "${RAW_TRANSCRIPT// }" ]]; then
-    log_warn "No transcribed speech detected."
+    log_no_speech
     exit 0
 fi
 
@@ -365,7 +384,7 @@ WAKE_WORD_CHECK="${WAKE_WORD_ENABLED:-false}"
 
 if [[ "$WAKE_WORD_CHECK" == "true" && -n "$WAKE_WORD_SETTING" ]]; then
     if STRIPPED_PROMPT="$(check_wake_word "$RAW_TRANSCRIPT" "$WAKE_WORD_SETTING" "${WAKE_WORD_STRIP:-true}")"; then
-        log_info "Wake word '${WAKE_WORD_SETTING}' detected."
+        log_wake_success "$WAKE_WORD_SETTING"
         if [[ -z "$STRIPPED_PROMPT" ]]; then
             log_warn "Wake word detected, but no code command followed. Exiting."
             exit 0
@@ -373,7 +392,7 @@ if [[ "$WAKE_WORD_CHECK" == "true" && -n "$WAKE_WORD_SETTING" ]]; then
         RAW_TRANSCRIPT="$STRIPPED_PROMPT"
         log_info "Cleaned speech (wake word stripped): \"${RAW_TRANSCRIPT}\""
     else
-        log_warn "Wake word '${WAKE_WORD_SETTING}' not detected in speech. Ignoring."
+        log_wake_fail "$WAKE_WORD_SETTING"
         exit 0
     fi
 fi

@@ -34,7 +34,23 @@ LLM_MODEL="${LLM_MODEL_NAME:-prompt-optimizer:latest}"
 
 mkdir -p "$TMP_DIR"
 
+COLOR_GREEN="\033[1;32m"
+COLOR_RED="\033[1;31m"
+COLOR_YELLOW="\033[1;33m"
+COLOR_CYAN="\033[1;36m"
+COLOR_BOLD="\033[1m"
+COLOR_RESET="\033[0m"
+
 log() { printf "[ai-dictate] %s\n" "$*"; }
+log_wake_success() {
+    printf "  ${COLOR_GREEN}✔${COLOR_RESET} ${COLOR_BOLD}[ai-dictate]${COLOR_RESET} Wake word ${COLOR_CYAN}\"%s\"${COLOR_RESET} detected — ${COLOR_GREEN}${COLOR_BOLD}LISTENING${COLOR_RESET}\n" "$*"
+}
+log_wake_fail() {
+    printf "  ${COLOR_RED}✖${COLOR_RESET} ${COLOR_BOLD}[ai-dictate]${COLOR_RESET} Wake word ${COLOR_CYAN}\"%s\"${COLOR_RESET} not detected — ${COLOR_RED}${COLOR_BOLD}NOT LISTENING${COLOR_RESET}\n" "$*"
+}
+log_no_speech() {
+    printf "  ${COLOR_RED}✖${COLOR_RESET} ${COLOR_BOLD}[ai-dictate]${COLOR_RESET} No speech detected — ${COLOR_RED}${COLOR_BOLD}NOT LISTENING${COLOR_RESET}\n"
+}
 
 resolve_whisper_bin() {
     local target="${1:-whisper-cli}"
@@ -176,24 +192,30 @@ run_pipeline() {
             local RECORD_SCRIPT="${REPO_ROOT}/scripts/audio/record_until_silence.py"
             local RECORDED=false
 
+            # Clean up stale audio file before recording
+            rm -f "$AUDIO_FILE"
+
             # 1. Primary: Intelligent Python silence-detection recorder
             if [[ -f "$RECORD_SCRIPT" ]] && command -v python3 &>/dev/null; then
-                python3 "$RECORD_SCRIPT" \
+                if ! python3 "$RECORD_SCRIPT" \
                     --output "$AUDIO_FILE" \
-                    --silence-duration "${AUDIO_SILENCE_DURATION:-1.2}" \
+                    --silence-duration "${AUDIO_SILENCE_DURATION:-5.0}" \
                     --threshold "${AUDIO_SILENCE_THRESHOLD:-2.0%}" \
                     --sample-rate "${AUDIO_SAMPLE_RATE:-16000}" \
-                    --wait-timeout "${AUDIO_WAIT_TIMEOUT:-20.0}" \
+                    --wait-timeout "${AUDIO_LISTEN_TIMEOUT:-${LISTEN_TIMEOUT:-${AUDIO_WAIT_TIMEOUT:-30.0}}}" \
                     --max-duration "${AUDIO_MAX_DURATION:-120.0}" \
                     --backend "${AUDIO_RECORDER:-auto}" \
                     --device "${AUDIO_DEVICE:-default}" \
-                    --prefix "[ai-dictate] "
+                    --prefix "[ai-dictate] "; then
+                    log_no_speech
+                    return 0
+                fi
                 RECORDED=true
             # 2. Sox fallback (if explicitly available)
             elif command -v sox &>/dev/null; then
                 log "Listening... (Speak now; recording stops after silence)"
                 sox -d -r "${AUDIO_SAMPLE_RATE:-16000}" -c 1 -b 16 "$AUDIO_FILE" \
-                    silence 1 0.1 "${AUDIO_SILENCE_THRESHOLD:-2%}" 1 "${AUDIO_SILENCE_DURATION:-1.2}" "${AUDIO_SILENCE_THRESHOLD:-2%}" 2>/dev/null
+                    silence 1 0.1 "${AUDIO_SILENCE_THRESHOLD:-2%}" 1 "${AUDIO_SILENCE_DURATION:-5.0}" "${AUDIO_SILENCE_THRESHOLD:-2%}" 2>/dev/null
                 RECORDED=true
             # 3. arecord fallback
             elif command -v arecord &>/dev/null; then
@@ -216,6 +238,12 @@ run_pipeline() {
                 exit 1
             fi
             log "Audio capture finished."
+        fi
+
+        # Verify audio file exists and is non-empty
+        if [[ ! -f "$AUDIO_FILE" || ! -s "$AUDIO_FILE" ]]; then
+            log_no_speech
+            return 0
         fi
 
         # If user only wanted to record audio, exit early without calling Whisper
@@ -260,7 +288,7 @@ run_pipeline() {
     fi
 
     if [[ -z "${RAW_TRANSCRIPT// }" ]]; then
-        log "No speech detected."
+        log_no_speech
         return 0
     fi
 
@@ -273,7 +301,7 @@ run_pipeline() {
     if [[ "$ww_active" == "true" && -n "$ww_target" ]]; then
         local stripped_prompt
         if stripped_prompt="$(check_wake_word "$RAW_TRANSCRIPT" "$ww_target" "${WAKE_WORD_STRIP:-true}")"; then
-            log "Wake word '${ww_target}' detected."
+            log_wake_success "$ww_target"
             if [[ -z "$stripped_prompt" ]]; then
                 log "Wake word detected, but no command followed. Skipping."
                 return 0
@@ -281,7 +309,7 @@ run_pipeline() {
             RAW_TRANSCRIPT="$stripped_prompt"
             log "Cleaned prompt (wake word stripped): \"${RAW_TRANSCRIPT}\""
         else
-            log "Wake word '${ww_target}' not detected in speech. Ignoring."
+            log_wake_fail "$ww_target"
             return 0
         fi
     fi
@@ -370,7 +398,7 @@ print(json.dumps({
 }
 
 if [[ "$CONTINUOUS_MODE" == "true" ]]; then
-    log "Starting continuous dictation daemon (Wake word: '${WAKE_WORD:-none}', Press Ctrl+C to stop)..."
+    printf "\n${COLOR_CYAN}===> Continuous Voice Daemon Active${COLOR_RESET} (Wake word: ${COLOR_CYAN}\"%s\"${COLOR_RESET}, Press Ctrl+C to stop)\n" "${WAKE_WORD:-none}"
     while true; do
         run_pipeline || true
         sleep 0.3

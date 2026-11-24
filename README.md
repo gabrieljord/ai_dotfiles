@@ -146,9 +146,9 @@ WAKE_WORD_STRIP=true
 
 Configure parameters in `.env`:
 ```bash
-AUDIO_SILENCE_DURATION=1.2     # Silence duration in seconds before finalizing capture
+AUDIO_SILENCE_DURATION=5.0     # Silence duration in seconds before finalizing capture
 AUDIO_SILENCE_THRESHOLD="2.0%" # Energy threshold (percentage or integer RMS)
-AUDIO_WAIT_TIMEOUT=20          # Max wait time for initial speech onset
+AUDIO_LISTEN_TIMEOUT=30        # Max wait time in seconds for initial speech while listening
 AUDIO_MAX_DURATION=120         # Maximum safety recording duration (seconds)
 ```
 - **Sci-Fi Single-Syllable Codex (`whisper/grammars/scifi_lexicon.md`)**:

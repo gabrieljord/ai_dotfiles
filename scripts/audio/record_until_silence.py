@@ -55,18 +55,30 @@ except ImportError:
 @contextlib.contextmanager
 def suppress_c_stderr():
     """Redirects C-level stderr (fd 2) to /dev/null temporarily."""
+    devnull = -1
+    old_stderr = -1
     try:
-        devnull = os.open(os.devnull, os.O_WRONLY)
-        old_stderr = os.dup(2)
-        os.dup2(devnull, 2)
-        os.close(devnull)
         try:
-            yield
-        finally:
-            os.dup2(old_stderr, 2)
-            os.close(old_stderr)
-    except Exception:
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            old_stderr = os.dup(2)
+            os.dup2(devnull, 2)
+            os.close(devnull)
+            devnull = -1
+        except Exception:
+            pass
         yield
+    finally:
+        if old_stderr != -1:
+            try:
+                os.dup2(old_stderr, 2)
+                os.close(old_stderr)
+            except Exception:
+                pass
+        if devnull != -1:
+            try:
+                os.close(devnull)
+            except Exception:
+                pass
 
 
 class AudioStreamBase:
@@ -213,13 +225,16 @@ def main():
     parser.add_argument("-o", "--output", default=os.getenv("AI_AUDIO_OUTPUT", "/tmp/ai_dotfiles/input_recording.wav"),
                         help="Path to save output WAV file")
     parser.add_argument("-s", "--silence-duration", type=float,
-                        default=float(os.getenv("AUDIO_SILENCE_DURATION", "1.2")),
-                        help="Duration of silence in seconds to trigger end of recording (default: 1.2)")
+                        default=float(os.getenv("AUDIO_SILENCE_DURATION", "5.0")),
+                        help="Duration of silence in seconds to trigger end of recording (default: 5.0)")
     parser.add_argument("-t", "--threshold", default=os.getenv("AUDIO_SILENCE_THRESHOLD", "2.0%"),
                         help="Silence/energy threshold as percentage (e.g. 2%%) or raw RMS value (e.g. 600)")
-    parser.add_argument("-w", "--wait-timeout", type=float,
-                        default=float(os.getenv("AUDIO_WAIT_TIMEOUT", "20.0")),
-                        help="Max seconds to wait for speech before exiting (default: 20)")
+    default_listen_timeout = float(
+        os.getenv("AUDIO_LISTEN_TIMEOUT", os.getenv("LISTEN_TIMEOUT", os.getenv("AUDIO_WAIT_TIMEOUT", "30.0")))
+    )
+    parser.add_argument("-w", "--wait-timeout", "--listen-timeout", type=float,
+                        default=default_listen_timeout,
+                        help="Max seconds to wait for speech while listening before exiting (default: 30)")
     parser.add_argument("-m", "--max-duration", type=float,
                         default=float(os.getenv("AUDIO_MAX_DURATION", "120.0")),
                         help="Maximum total recording duration in seconds (default: 120)")
@@ -295,7 +310,7 @@ def main():
             )
 
         if not args.quiet:
-            sys.stderr.write(f"{prefix}Listening... (Speak now; recording stops after silence)\n")
+            sys.stderr.write(f"{prefix}Listening... (Speak now; recording stops after {args.silence_duration:.0f}s of silence)\n")
 
         # Phase 2: State Machine
         STATE_WAITING = 0
@@ -337,15 +352,19 @@ def main():
                     captured_frames.append(data)
                     silence_duration_acc = 0.0
                     if not args.quiet and not args.verbose:
-                        sys.stderr.write(f"{prefix}Voice detected; recording...\n")
+                        sys.stderr.write(f"{prefix}Voice detected; recording (stops after {args.silence_duration:.0f}s of silence)...\n")
 
                 # Check initial wait timeout
                 if time.time() - start_wait_time > args.wait_timeout:
                     if not args.quiet:
                         sys.stderr.write(f"\n{prefix}No speech detected after {args.wait_timeout:.1f}s. Exiting.\n")
-                    # Create empty or minimal silence WAV so downstream tools don't crash
-                    save_wav(args.output, list(pre_speech_ring), sample_rate)
-                    return 0
+                    # Clean up stale output file if it exists
+                    if os.path.exists(args.output):
+                        try:
+                            os.remove(args.output)
+                        except OSError:
+                            pass
+                    return 2
 
             elif state == STATE_RECORDING:
                 captured_frames.append(data)
@@ -372,8 +391,8 @@ def main():
 
     if captured_frames:
         # Phase 3: Trailing silence trimming
-        # Keep approx 0.2s of silence at the end for natural Whisper STT ending
-        trim_silence_chunks = int(max(0.0, args.silence_duration - 0.2) / chunk_duration)
+        # Keep approx 0.3s of silence at the end for natural Whisper STT ending
+        trim_silence_chunks = int(max(0.0, args.silence_duration - 0.3) / chunk_duration)
         if trim_silence_chunks > 0 and len(captured_frames) > trim_silence_chunks:
             final_frames = captured_frames[:-trim_silence_chunks]
         else:
@@ -383,13 +402,17 @@ def main():
         total_duration = len(final_frames) * chunk_duration
         if not args.quiet:
             sys.stderr.write(f"{prefix}Audio captured: {total_duration:.1f}s -> {args.output}\n")
+        return 0
     else:
-        # If nothing was captured, save minimal wav
-        save_wav(args.output, [], sample_rate)
+        # If nothing was captured, clean up any output file and exit with code 2
+        if os.path.exists(args.output):
+            try:
+                os.remove(args.output)
+            except OSError:
+                pass
         if not args.quiet:
-            sys.stderr.write(f"{prefix}No speech recorded -> {args.output}\n")
-
-    return 0
+            sys.stderr.write(f"{prefix}No speech recorded.\n")
+        return 2
 
 
 if __name__ == "__main__":
