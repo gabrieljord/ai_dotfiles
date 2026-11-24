@@ -90,6 +90,9 @@ check_command() {
     if command -v "$cmd" &>/dev/null; then
         printf "  %-18s ${COLOR_GREEN}✓ Found${COLOR_RESET} (${COLOR_GRAY}%s${COLOR_RESET})\n" "$cmd" "$(command -v "$cmd")"
         return 0
+    elif [[ -x "${HOME}/.local/bin/${cmd}" ]]; then
+        printf "  %-18s ${COLOR_GREEN}✓ Found${COLOR_RESET} (${COLOR_GRAY}%s${COLOR_RESET})\n" "$cmd" "${HOME}/.local/bin/${cmd}"
+        return 0
     else
         if [[ "$required" == "true" ]]; then
             printf "  %-18s ${COLOR_RED}✗ Missing (Required)${COLOR_RESET}\n" "$cmd"
@@ -210,8 +213,10 @@ create_symlink "${ENV_TARGET}" "${TARGET_CONFIG_DIR}/.env"
 mkdir -p "${TARGET_BIN_DIR}"
 chmod +x "${SCRIPT_DIR}/scripts/pipeline/transcribe_and_optimize.sh" || true
 chmod +x "${SCRIPT_DIR}/scripts/dictate.sh" || true
+chmod +x "${SCRIPT_DIR}/scripts/audio/record_until_silence.py" || true
 create_symlink "${SCRIPT_DIR}/scripts/pipeline/transcribe_and_optimize.sh" "${TARGET_BIN_DIR}/ai-dictate"
 create_symlink "${SCRIPT_DIR}/scripts/dictate.sh" "${TARGET_BIN_DIR}/ai-dictate-code"
+create_symlink "${SCRIPT_DIR}/scripts/audio/record_until_silence.py" "${TARGET_BIN_DIR}/ai-record"
 
 # Verify ~/.local/bin is in PATH
 if [[ ":$PATH:" != *":$TARGET_BIN_DIR:"* ]]; then

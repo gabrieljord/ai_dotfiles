@@ -98,6 +98,59 @@ Whisper's initial prompt (`-p` / `--prompt`) biases acoustic token probabilities
 
 ### 2. Spoken Grammars (`whisper/grammars/*.md`)
 Grammars dictate how spoken words translate to syntax, boilerplate, and keywords:
+
+---
+
+## Wake Word Activation & Voice Control
+
+`ai_dotfiles` supports customizable, case-insensitive **Wake Word Detection** with automated prefix stripping.
+
+### Configuration (`.env`)
+```bash
+# Enable wake word verification
+WAKE_WORD_ENABLED=true
+
+# Set your custom wake word or phrase
+WAKE_WORD="computer"
+
+# Automatically strip wake word and following punctuation before passing to LLM
+WAKE_WORD_STRIP=true
+```
+
+### Supported Variations & Features
+- **Conversational Fillers**: Naturally tolerates filler prefixes like `"Hey"`, `"Um"`, `"Ok"`, or `"Uh"` (e.g. `"Hey computer, create a table"`).
+- **Multiple Alternatives**: Alternate wake words can be separated by a pipe `|`:
+  ```bash
+  WAKE_WORD="computer|jarvis"
+  ```
+- **CLI Overrides**:
+  ```bash
+  # Override or enable wake word on the fly:
+  ai-dictate --wake-word "jarvis"
+
+  # Temporarily disable wake word requirement:
+  ai-dictate --no-wake-word
+
+  # Run as a continuous hands-free voice daemon:
+  ai-dictate --continuous --wake-word "computer"
+  ```
+
+---
+
+## Audio Capture & Silence Detection
+
+`ai-dictate` includes an intelligent **Voice Activity & Silence Detection (VAD)** audio recorder (`scripts/audio/record_until_silence.py` / `ai-record`):
+- **Runs Until You Stop Speaking**: Dynamically calibrates ambient room noise floor, detects speech onset, buffers the pre-speech audio (preventing first syllable clipping), and automatically ends recording once a configured period of silence is detected (default `1.2s`).
+- **Zero ALSA Spam**: Suppresses low-level ALSA driver warnings for clean terminal logging.
+- **Backends**: Direct PyAudio stream with automatic fallback to `arecord`, `parecord`, `ffmpeg`, or `sox`.
+
+Configure parameters in `.env`:
+```bash
+AUDIO_SILENCE_DURATION=1.2     # Silence duration in seconds before finalizing capture
+AUDIO_SILENCE_THRESHOLD="2.0%" # Energy threshold (percentage or integer RMS)
+AUDIO_WAIT_TIMEOUT=20          # Max wait time for initial speech onset
+AUDIO_MAX_DURATION=120         # Maximum safety recording duration (seconds)
+```
 - **Sci-Fi Single-Syllable Codex (`whisper/grammars/scifi_lexicon.md`)**:
   - Maps **all 1,392 distinct words** from `config/prompts/lang_prompts.env` to strictly single-syllable sci-fi/cybernetic codewords to eliminate recognition slur and speech fatigue during dictation.
   - `test` $\rightarrow$ `if`

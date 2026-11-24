@@ -71,7 +71,7 @@ SCIFI_MONOSYLLABLES = sorted(list(set([
     # Combat, Actions & Mechanics
     "strike", "slam", "smash", "crash", "thud", "boom", "bang", "crack", "snap", "pop", 
     "click", "hack", "shred", "rip", "rend", "tear", "crush", "grind", "mill", "split", 
-    "meld", "bond", "bind", "tie", "knot", "braid", "scram", "bail", "dump", "purge", 
+    "meld", "bond", "bind", "tie", "knot", "braid", "scram", "bail", "dump", "purge", processing
     "flush", "drain", "bleed", "leak", "flood", "quell", "quench", "scour", "wipe", 
     "snag", "trap", "clinch", "seize", "catch", "hunt", "stalk", "raid", "siege", 
     "blitz", "war", "clash", "bout", "round", "pass", "turn", "shift", "phase", "stage", 

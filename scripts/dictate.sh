@@ -68,7 +68,35 @@ fi
 TMP_DIR="${AI_TMP_DIR:-/tmp/ai_dotfiles}"
 DEFAULT_AUDIO="${TMP_DIR}/input_recording.wav"
 
-WHISPER_BIN="${WHISPER_BIN_PATH:-whisper-cli}"
+resolve_whisper_bin() {
+    local target="${1:-whisper-cli}"
+    if [[ -x "$target" ]]; then
+        echo "$target"
+        return 0
+    fi
+    if command -v "$target" &>/dev/null; then
+        command -v "$target"
+        return 0
+    fi
+    local candidates=(
+        "${HOME}/.local/bin/whisper-cli"
+        "${HOME}/.local/share/whisper.cpp/src/build/bin/whisper-cli"
+        "${HOME}/.local/share/whisper.cpp/build/bin/whisper-cli"
+        "${HOME}/.local/share/whisper.cpp/src/build/bin/main"
+        "${HOME}/.local/share/whisper.cpp/src/main"
+        "/usr/local/bin/whisper-cli"
+        "/usr/bin/whisper-cli"
+    )
+    for c in "${candidates[@]}"; do
+        if [[ -x "$c" ]]; then
+            echo "$c"
+            return 0
+        fi
+    done
+    echo "$target"
+}
+
+WHISPER_BIN="$(resolve_whisper_bin "${WHISPER_BIN_PATH:-whisper-cli}")"
 WHISPER_MODEL="${WHISPER_MODEL_PATH:-$HOME/.local/share/whisper.cpp/models/ggml-large-v3-turbo.bin}"
 WHISPER_THREADS="${WHISPER_THREADS:-4}"
 # CPU-only constraint: 0 GPU layers offloaded
@@ -90,6 +118,36 @@ TARGET_EXT=""
 AUDIO_FILE=""
 RAW_TEXT_OVERRIDE=""
 
+check_wake_word() {
+    local text="$1"
+    local wake_word="$2"
+    local strip="${3:-true}"
+
+    if [[ -z "$wake_word" ]]; then
+        echo "$text"
+        return 0
+    fi
+
+    # Support optional conversational fillers (uh, um, hey, ok, okay) before wake word
+    local pattern="^[[:space:]]*((uh|um|hey|ok|okay)[[:space:],.:;!?-]+)?(${wake_word})[[:space:],.:;!?-]*(.*)$"
+    shopt -s nocasematch
+    if [[ "$text" =~ $pattern ]]; then
+        shopt -u nocasematch
+        if [[ "$strip" == "true" ]]; then
+            local trimmed="${BASH_REMATCH[4]}"
+            trimmed="${trimmed#"${trimmed%%[![:space:]]*}"}"
+            trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+            echo "$trimmed"
+        else
+            echo "$text"
+        fi
+        return 0
+    else
+        shopt -u nocasematch
+        return 1
+    fi
+}
+
 usage() {
     local exit_code="${1:-0}"
     cat >&2 <<EOF
@@ -102,6 +160,9 @@ Arguments:
 Options:
   -e, --ext EXT       Specify target file extension
   -a, --audio FILE    Specify audio WAV input file
+  --record            Record microphone audio until silence before transcribing
+  --wake-word WORD    Require spoken wake word (e.g. 'computer', 'jarvis'; overrides .env)
+  --no-wake-word      Disable wake word check (even if enabled in .env)
   -r, --raw-text STR  Bypass Whisper and pipe raw text directly to LLM formatter
   -m, --model MODEL   Override Ollama/LM Studio model name
   -h, --help          Show this help message
@@ -111,6 +172,7 @@ EOF
 
 # Parse options
 POSITIONAL_ARGS=()
+FLAG_RECORD=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -e|--ext)
@@ -120,6 +182,19 @@ while [[ $# -gt 0 ]]; do
         -a|--audio)
             AUDIO_FILE="$2"
             shift 2
+            ;;
+        --record)
+            FLAG_RECORD=true
+            shift
+            ;;
+        --wake-word)
+            WAKE_WORD="$2"
+            WAKE_WORD_ENABLED=true
+            shift 2
+            ;;
+        --no-wake-word)
+            WAKE_WORD_ENABLED=false
+            shift
             ;;
         -r|--raw-text)
             RAW_TEXT_OVERRIDE="$2"
@@ -205,6 +280,24 @@ if [[ -n "$RAW_TEXT_OVERRIDE" ]]; then
     RAW_TRANSCRIPT="$RAW_TEXT_OVERRIDE"
     log_info "Using raw text override: \"${RAW_TRANSCRIPT}\""
 else
+    # Check if audio recording is requested or default audio file does not exist
+    RECORD_SCRIPT="${SCRIPT_DIR}/audio/record_until_silence.py"
+    if [[ "$FLAG_RECORD" == "true" || (! -f "$AUDIO_FILE" && "$AUDIO_FILE" == "$DEFAULT_AUDIO") ]]; then
+        if [[ -f "$RECORD_SCRIPT" ]] && command -v python3 &>/dev/null; then
+            log_info "Recording audio from microphone until silence..."
+            python3 "$RECORD_SCRIPT" \
+                --output "$AUDIO_FILE" \
+                --silence-duration "${AUDIO_SILENCE_DURATION:-1.2}" \
+                --threshold "${AUDIO_SILENCE_THRESHOLD:-2.0%}" \
+                --sample-rate "${AUDIO_SAMPLE_RATE:-16000}" \
+                --wait-timeout "${AUDIO_WAIT_TIMEOUT:-20.0}" \
+                --max-duration "${AUDIO_MAX_DURATION:-120.0}" \
+                --backend "${AUDIO_RECORDER:-auto}" \
+                --device "${AUDIO_DEVICE:-default}" \
+                --prefix "[dictate] " >&2
+        fi
+    fi
+
     # Verify audio file existence
     if [[ ! -f "$AUDIO_FILE" ]]; then
         log_err "Audio file not found: ${AUDIO_FILE}"
@@ -232,17 +325,24 @@ else
     log_info "Transcribing ${AUDIO_FILE} via whisper.cpp (CPU threads: ${WHISPER_THREADS}, GPU layers: ${WHISPER_N_GPU_LAYERS})..."
 
     # Execute whisper-cli:
-    #   -p / --prompt : Injects the language-specific vocabulary to prime the acoustic decoder.
-    #   -ngl 0        : Enforces CPU-only execution (0 GPU offloaded layers).
+    #   --prompt      : Injects the language-specific vocabulary to prime the acoustic decoder.
+    #   -ng           : Enforces CPU-only execution (disables GPU offloading).
     #   -nt           : Suppresses timestamp markers from stdout.
+    #   -np           : Suppresses info/banner prints, leaving clean transcript output.
     #   stderr is redirected to /dev/null so timing/loading stats do not corrupt stdout.
+    WHISPER_GPU_ARGS=()
+    if [[ "${WHISPER_N_GPU_LAYERS:-0}" == "0" ]]; then
+        WHISPER_GPU_ARGS+=("-ng")
+    fi
+
     WHISPER_OUTPUT="$(
         "$WHISPER_BIN" \
             -m "$WHISPER_MODEL" \
             -f "$AUDIO_FILE" \
-            -p "$VOCAB_PROMPT" \
+            --prompt "$VOCAB_PROMPT" \
             -nt \
-            -ngl "$WHISPER_N_GPU_LAYERS" \
+            -np \
+            "${WHISPER_GPU_ARGS[@]}" \
             --threads "$WHISPER_THREADS" \
             --language "${WHISPER_LANGUAGE:-en}" \
             2>/dev/null || true
@@ -258,6 +358,25 @@ if [[ -z "${RAW_TRANSCRIPT// }" ]]; then
 fi
 
 log_info "Whisper Raw Transcript: \"${RAW_TRANSCRIPT}\""
+
+# Wake Word Verification & Stripping
+WAKE_WORD_SETTING="${WAKE_WORD:-}"
+WAKE_WORD_CHECK="${WAKE_WORD_ENABLED:-false}"
+
+if [[ "$WAKE_WORD_CHECK" == "true" && -n "$WAKE_WORD_SETTING" ]]; then
+    if STRIPPED_PROMPT="$(check_wake_word "$RAW_TRANSCRIPT" "$WAKE_WORD_SETTING" "${WAKE_WORD_STRIP:-true}")"; then
+        log_info "Wake word '${WAKE_WORD_SETTING}' detected."
+        if [[ -z "$STRIPPED_PROMPT" ]]; then
+            log_warn "Wake word detected, but no code command followed. Exiting."
+            exit 0
+        fi
+        RAW_TRANSCRIPT="$STRIPPED_PROMPT"
+        log_info "Cleaned speech (wake word stripped): \"${RAW_TRANSCRIPT}\""
+    else
+        log_warn "Wake word '${WAKE_WORD_SETTING}' not detected in speech. Ignoring."
+        exit 0
+    fi
+fi
 
 # ------------------------------------------------------------------------------
 # 6. LLM Code Formatting & Structural Normalization (Ollama / LM Studio)
