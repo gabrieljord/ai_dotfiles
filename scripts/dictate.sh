@@ -128,11 +128,71 @@ log_no_speech() {
 }
 
 # ------------------------------------------------------------------------------
+# Desktop Notification & Clipboard Helpers
+# ------------------------------------------------------------------------------
+desktop_notify() {
+    local title="$1"
+    local message="$2"
+    local urgency="${3:-normal}"
+    local icon="${4:-audio-input-microphone}"
+
+    # STRICT REQUIREMENT: Only notify when in continuous mode (-c) AND notifications are enabled
+    if [[ "${CONTINUOUS_MODE:-false}" != "true" || "${NOTIFY_ON_CONTINUOUS:-true}" != "true" ]]; then
+        return 0
+    fi
+
+    # Ensure DBUS address and XDG runtime are present for notifications across screens
+    if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" && -S "/run/user/$(id -u)/bus" ]]; then
+        export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
+    fi
+    if [[ -z "${XDG_RUNTIME_DIR:-}" && -d "/run/user/$(id -u)" ]]; then
+        export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+    fi
+
+    if command -v notify-send &>/dev/null; then
+        notify-send \
+            --app-name="ai-dictate-code" \
+            --urgency="$urgency" \
+            --expire-time="${NOTIFY_TIMEOUT_MS:-3000}" \
+            --icon="$icon" \
+            "$title" \
+            "$message" 2>/dev/null || true
+    fi
+}
+
+dispatch_clipboard() {
+    local text="$1"
+    if command -v wl-copy &>/dev/null && printf "%s" "$text" | wl-copy 2>/dev/null; then
+        log_info "Copied to Wayland clipboard."
+        return 0
+    elif command -v xclip &>/dev/null && printf "%s" "$text" | xclip -selection clipboard 2>/dev/null; then
+        log_info "Copied to X11 clipboard."
+        return 0
+    elif command -v pbcopy &>/dev/null && printf "%s" "$text" | pbcopy 2>/dev/null; then
+        log_info "Copied to macOS clipboard."
+        return 0
+    fi
+    return 1
+}
+
+trigger_autopaste() {
+    if [[ "${AUTO_PASTE_ENABLED:-false}" == "true" ]]; then
+        sleep 0.2
+        if command -v wtype &>/dev/null; then
+            wtype -M ctrl -k v -m ctrl 2>/dev/null || true
+        elif command -v xdotool &>/dev/null; then
+            xdotool key --clearmodifiers ctrl+v 2>/dev/null || true
+        fi
+    fi
+}
+
+# ------------------------------------------------------------------------------
 # 3. CLI Argument Parsing
 # ------------------------------------------------------------------------------
 TARGET_EXT=""
 AUDIO_FILE=""
 RAW_TEXT_OVERRIDE=""
+CONTINUOUS_MODE="${CONTINUOUS_MODE:-false}"
 
 check_wake_word() {
     local text="$1"
@@ -176,6 +236,7 @@ Arguments:
 Options:
   -e, --ext EXT       Specify target file extension
   -a, --audio FILE    Specify audio WAV input file
+  -c, --continuous    Run continuous dictation daemon (listen repeatedly until Ctrl+C)
   --record            Record microphone audio until silence before transcribing
   --wake-word WORD    Require spoken wake word (e.g. 'computer', 'jarvis'; overrides .env)
   --no-wake-word      Disable wake word check (even if enabled in .env)
@@ -200,6 +261,10 @@ while [[ $# -gt 0 ]]; do
             AUDIO_FILE="$2"
             CUSTOM_AUDIO_SPECIFIED=true
             shift 2
+            ;;
+        -c|--continuous)
+            CONTINUOUS_MODE=true
+            shift
             ;;
         --record)
             FLAG_RECORD=true
@@ -290,128 +355,131 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# 5. Whisper Audio Transcription (whisper.cpp)
+# 5. Pipeline Execution Logic (Whisper Transcription & LLM Formatting)
 # ------------------------------------------------------------------------------
-RAW_TRANSCRIPT=""
+run_dictate_pipeline() {
+    local RAW_TRANSCRIPT=""
 
-if [[ -n "$RAW_TEXT_OVERRIDE" ]]; then
-    # Fast path: user supplied raw text directly (skips whisper execution)
-    RAW_TRANSCRIPT="$RAW_TEXT_OVERRIDE"
-    log_info "Using raw text override: \"${RAW_TRANSCRIPT}\""
-else
-    # If no custom audio file was passed, record fresh audio from microphone
-    RECORD_SCRIPT="${SCRIPT_DIR}/audio/record_until_silence.py"
-    if [[ "$CUSTOM_AUDIO_SPECIFIED" == "false" || "$FLAG_RECORD" == "true" ]]; then
-        if [[ -f "$RECORD_SCRIPT" ]] && command -v python3 &>/dev/null; then
-            # Clean up stale audio file before recording
-            rm -f "$AUDIO_FILE"
+    if [[ -n "$RAW_TEXT_OVERRIDE" ]]; then
+        # Fast path: user supplied raw text directly (skips whisper execution)
+        RAW_TRANSCRIPT="$RAW_TEXT_OVERRIDE"
+        log_info "Using raw text override: \"${RAW_TRANSCRIPT}\""
+    else
+        # If no custom audio file was passed, record fresh audio from microphone
+        local RECORD_SCRIPT="${SCRIPT_DIR}/audio/record_until_silence.py"
+        if [[ "$CUSTOM_AUDIO_SPECIFIED" == "false" || "$FLAG_RECORD" == "true" ]]; then
+            if [[ -f "$RECORD_SCRIPT" ]] && command -v python3 &>/dev/null; then
+                # Clean up stale audio file before recording
+                rm -f "$AUDIO_FILE"
 
-            if ! python3 "$RECORD_SCRIPT" \
-                --output "$AUDIO_FILE" \
-                --silence-duration "${AUDIO_SILENCE_DURATION:-5.0}" \
-                --threshold "${AUDIO_SILENCE_THRESHOLD:-2.0%}" \
-                --sample-rate "${AUDIO_SAMPLE_RATE:-16000}" \
-                --wait-timeout "${AUDIO_LISTEN_TIMEOUT:-${LISTEN_TIMEOUT:-${AUDIO_WAIT_TIMEOUT:-30.0}}}" \
-                --max-duration "${AUDIO_MAX_DURATION:-120.0}" \
-                --backend "${AUDIO_RECORDER:-auto}" \
-                --device "${AUDIO_DEVICE:-default}" \
-                --prefix "[dictate] " >&2; then
-                log_no_speech
-                exit 0
+                if ! python3 "$RECORD_SCRIPT" \
+                    --output "$AUDIO_FILE" \
+                    --silence-duration "${AUDIO_SILENCE_DURATION:-5.0}" \
+                    --threshold "${AUDIO_SILENCE_THRESHOLD:-2.0%}" \
+                    --sample-rate "${AUDIO_SAMPLE_RATE:-16000}" \
+                    --wait-timeout "${AUDIO_LISTEN_TIMEOUT:-${LISTEN_TIMEOUT:-${AUDIO_WAIT_TIMEOUT:-30.0}}}" \
+                    --max-duration "${AUDIO_MAX_DURATION:-120.0}" \
+                    --backend "${AUDIO_RECORDER:-auto}" \
+                    --device "${AUDIO_DEVICE:-default}" \
+                    --prefix "[dictate] " >&2; then
+                    log_no_speech
+                    return 0
+                fi
             fi
         fi
-    fi
 
-    # Verify audio file existence and non-empty
-    if [[ ! -f "$AUDIO_FILE" || ! -s "$AUDIO_FILE" ]]; then
-        log_no_speech
-        exit 0
-    fi
-
-    # Verify whisper binary
-    if ! command -v "$WHISPER_BIN" &>/dev/null && [[ ! -x "$WHISPER_BIN" ]]; then
-        log_err "whisper.cpp binary not executable at: ${WHISPER_BIN}"
-        log_err "Compile it via 'scripts/setup/setup_whisper_cpp.sh' or set WHISPER_BIN_PATH."
-        exit 1
-    fi
-
-    # Verify model weights file
-    if [[ ! -f "$WHISPER_MODEL" ]]; then
-        log_err "Whisper model not found at: ${WHISPER_MODEL}"
-        exit 1
-    fi
-
-    log_info "Transcribing ${AUDIO_FILE} via whisper.cpp (CPU threads: ${WHISPER_THREADS}, GPU layers: ${WHISPER_N_GPU_LAYERS})..."
-
-    # Execute whisper-cli:
-    #   --prompt      : Injects the language-specific vocabulary to prime the acoustic decoder.
-    #   -ng           : Enforces CPU-only execution (disables GPU offloading).
-    #   -nt           : Suppresses timestamp markers from stdout.
-    #   -np           : Suppresses info/banner prints, leaving clean transcript output.
-    #   stderr is redirected to /dev/null so timing/loading stats do not corrupt stdout.
-    WHISPER_GPU_ARGS=()
-    if [[ "${WHISPER_N_GPU_LAYERS:-0}" == "0" ]]; then
-        WHISPER_GPU_ARGS+=("-ng")
-    fi
-
-    WHISPER_OUTPUT="$(
-        "$WHISPER_BIN" \
-            -m "$WHISPER_MODEL" \
-            -f "$AUDIO_FILE" \
-            --prompt "$VOCAB_PROMPT" \
-            -nt \
-            -np \
-            "${WHISPER_GPU_ARGS[@]}" \
-            --threads "$WHISPER_THREADS" \
-            --language "${WHISPER_LANGUAGE:-en}" \
-            2>/dev/null || true
-    )"
-
-    # Clean whitespace and strip empty lines
-    RAW_TRANSCRIPT="$(echo "$WHISPER_OUTPUT" | tr -d '\r' | sed '/^[[:space:]]*$/d' | paste -sd " " - || true)"
-fi
-
-if [[ -z "${RAW_TRANSCRIPT// }" ]]; then
-    log_no_speech
-    exit 0
-fi
-
-log_info "Whisper Raw Transcript: \"${RAW_TRANSCRIPT}\""
-
-# Wake Word Verification & Stripping
-WAKE_WORD_SETTING="${WAKE_WORD:-}"
-WAKE_WORD_CHECK="${WAKE_WORD_ENABLED:-false}"
-
-if [[ "$WAKE_WORD_CHECK" == "true" && -n "$WAKE_WORD_SETTING" ]]; then
-    if STRIPPED_PROMPT="$(check_wake_word "$RAW_TRANSCRIPT" "$WAKE_WORD_SETTING" "${WAKE_WORD_STRIP:-true}")"; then
-        log_wake_success "$WAKE_WORD_SETTING"
-        if [[ -z "$STRIPPED_PROMPT" ]]; then
-            log_warn "Wake word detected, but no code command followed. Exiting."
-            exit 0
+        # Verify audio file existence and non-empty
+        if [[ ! -f "$AUDIO_FILE" || ! -s "$AUDIO_FILE" ]]; then
+            log_no_speech
+            return 0
         fi
-        RAW_TRANSCRIPT="$STRIPPED_PROMPT"
-        log_info "Cleaned speech (wake word stripped): \"${RAW_TRANSCRIPT}\""
-    else
-        log_wake_fail "$WAKE_WORD_SETTING"
-        exit 0
+
+        # Verify whisper binary
+        if ! command -v "$WHISPER_BIN" &>/dev/null && [[ ! -x "$WHISPER_BIN" ]]; then
+            log_err "whisper.cpp binary not executable at: ${WHISPER_BIN}"
+            log_err "Compile it via 'scripts/setup/setup_whisper_cpp.sh' or set WHISPER_BIN_PATH."
+            exit 1
+        fi
+
+        # Verify model weights file
+        if [[ ! -f "$WHISPER_MODEL" ]]; then
+            log_err "Whisper model not found at: ${WHISPER_MODEL}"
+            exit 1
+        fi
+
+        log_info "Transcribing ${AUDIO_FILE} via whisper.cpp (CPU threads: ${WHISPER_THREADS}, GPU layers: ${WHISPER_N_GPU_LAYERS})..."
+
+        # Execute whisper-cli:
+        #   --prompt      : Injects the language-specific vocabulary to prime the acoustic decoder.
+        #   -ng           : Enforces CPU-only execution (disables GPU offloading).
+        #   -nt           : Suppresses timestamp markers from stdout.
+        #   -np           : Suppresses info/banner prints, leaving clean transcript output.
+        #   stderr is redirected to /dev/null so timing/loading stats do not corrupt stdout.
+        local WHISPER_GPU_ARGS=()
+        if [[ "${WHISPER_N_GPU_LAYERS:-0}" == "0" ]]; then
+            WHISPER_GPU_ARGS+=("-ng")
+        fi
+
+        local WHISPER_OUTPUT
+        WHISPER_OUTPUT="$(
+            "$WHISPER_BIN" \
+                -m "$WHISPER_MODEL" \
+                -f "$AUDIO_FILE" \
+                --prompt "$VOCAB_PROMPT" \
+                -nt \
+                -np \
+                "${WHISPER_GPU_ARGS[@]}" \
+                --threads "$WHISPER_THREADS" \
+                --language "${WHISPER_LANGUAGE:-en}" \
+                2>/dev/null || true
+        )"
+
+        # Clean whitespace and strip empty lines
+        RAW_TRANSCRIPT="$(echo "$WHISPER_OUTPUT" | tr -d '\r' | sed '/^[[:space:]]*$/d' | paste -sd " " - || true)"
     fi
-fi
 
-# ------------------------------------------------------------------------------
-# 6. LLM Code Formatting & Structural Normalization (Ollama / LM Studio)
-# ------------------------------------------------------------------------------
-# Piping Logic:
-# 1. Provide current system date/time so temporal grammar rules expand accurately:
-#    - "american date today" -> MM/DD/YYYY
-#    - "iso date today"      -> YYYY-MM-DD
-# 2. Instruct the LLM to format exclusively in the requested file extension/syntax.
-# 3. Apply grammar rules (snake_case, camelCase, arrow functions, operators).
-# 4. Enforce STRICT code output: no conversational commentary, no markdown fences.
+    if [[ -z "${RAW_TRANSCRIPT// }" ]]; then
+        log_no_speech
+        return 0
+    fi
 
-DATE_AMERICAN="$(date +%m/%d/%Y)"
-DATE_ISO="$(date +%Y-%m-%d)"
+    log_info "Whisper Raw Transcript: \"${RAW_TRANSCRIPT}\""
 
-SYSTEM_PROMPT=$(cat <<EOF
+    # Wake Word Verification & Stripping
+    local WAKE_WORD_SETTING="${WAKE_WORD:-}"
+    local WAKE_WORD_CHECK="${WAKE_WORD_ENABLED:-false}"
+
+    if [[ "$WAKE_WORD_CHECK" == "true" && -n "$WAKE_WORD_SETTING" ]]; then
+        local STRIPPED_PROMPT
+        if STRIPPED_PROMPT="$(check_wake_word "$RAW_TRANSCRIPT" "$WAKE_WORD_SETTING" "${WAKE_WORD_STRIP:-true}")"; then
+            log_wake_success "$WAKE_WORD_SETTING"
+            desktop_notify "✔ Wake Word Heard" "Wake word '${WAKE_WORD_SETTING}' detected — listening (.${CLEAN_EXT})..." "normal" "audio-input-microphone"
+            if [[ -z "$STRIPPED_PROMPT" ]]; then
+                log_warn "Wake word detected, but no code command followed. Skipping."
+                desktop_notify "ai-dictate-code: Awaiting Code" "Wake word recognized, but no code command followed." "low" "dialog-information"
+                return 0
+            fi
+            RAW_TRANSCRIPT="$STRIPPED_PROMPT"
+            log_info "Cleaned speech (wake word stripped): \"${RAW_TRANSCRIPT}\""
+        else
+            log_wake_fail "$WAKE_WORD_SETTING"
+            desktop_notify "✖ Wake Word Not Detected" "Heard: \"${RAW_TRANSCRIPT}\" (Expected: \"${WAKE_WORD_SETTING}\")" "low" "dialog-information"
+            return 0
+        fi
+    else
+        desktop_notify "✔ Speech Heard" "Processing: \"${RAW_TRANSCRIPT}\" (.${CLEAN_EXT})..." "normal" "audio-input-microphone"
+    fi
+
+    # --------------------------------------------------------------------------
+    # 6. LLM Code Formatting & Structural Normalization (Ollama / LM Studio)
+    # ------------------------------------------------------------------------------
+    local DATE_AMERICAN
+    local DATE_ISO
+    DATE_AMERICAN="$(date +%m/%d/%Y)"
+    DATE_ISO="$(date +%Y-%m-%d)"
+
+    local SYSTEM_PROMPT
+    SYSTEM_PROMPT=$(cat <<EOF
 You are a precise, deterministic code compiler and spoken-grammar formatter for developers.
 The user dictated code and commands meant for a file with extension: .${CLEAN_EXT}
 
@@ -488,99 +556,116 @@ Grammar Rules & Transformations:
    - Do NOT wrap the output in markdown code fences (\`\`\`) unless explicitly asked.
    - Do NOT output any introductory text, apologies, pleasantries, or explanations.
 EOF
-)
+    )
 
-# Verify jq is installed for clean JSON encoding and decoding
-if ! command -v jq &>/dev/null; then
-    log_err "jq is required for API piping. Please install jq."
-    # Output raw transcript as emergency fallback
-    printf "%s\n" "$RAW_TRANSCRIPT"
+    # Verify jq is installed for clean JSON encoding and decoding
+    if ! command -v jq &>/dev/null; then
+        log_err "jq is required for API piping. Please install jq."
+        printf "%s\n" "$RAW_TRANSCRIPT"
+        return 0
+    fi
+
+    # Detect whether endpoint is Ollama (/api/generate) or OpenAI/LM Studio compatible (/v1)
+    local IS_OPENAI_COMPATIBLE=false
+    if [[ "$LLM_ENDPOINT" =~ /v1(/.*)?$ ]]; then
+        IS_OPENAI_COMPATIBLE=true
+    fi
+
+    local API_URL
+    local PAYLOAD
+    if [[ "$IS_OPENAI_COMPATIBLE" == "true" ]]; then
+        API_URL="${LLM_ENDPOINT%/}/chat/completions"
+        PAYLOAD="$(jq -n \
+            --arg model "$LLM_MODEL" \
+            --arg system "$SYSTEM_PROMPT" \
+            --arg user "$RAW_TRANSCRIPT" \
+            '{
+                model: $model,
+                messages: [
+                    {role: "system", content: $system},
+                    {role: "user", content: $user}
+                ],
+                temperature: 0.1,
+                stream: false
+            }')"
+    else
+        API_URL="${LLM_ENDPOINT%/}/api/generate"
+        PAYLOAD="$(jq -n \
+            --arg model "$LLM_MODEL" \
+            --arg system "$SYSTEM_PROMPT" \
+            --arg prompt "$RAW_TRANSCRIPT" \
+            '{
+                model: $model,
+                prompt: $prompt,
+                system: $system,
+                stream: false,
+                options: {
+                    temperature: 0.1,
+                    num_predict: 512
+                }
+            }')"
+    fi
+
+    log_info "Piping raw text to LLM (${LLM_MODEL} @ ${API_URL})..."
+
+    local HTTP_RESPONSE
+    HTTP_RESPONSE="$(curl -sS --max-time "$LLM_TIMEOUT" \
+        -X POST "$API_URL" \
+        -H "Content-Type: application/json" \
+        -d "$PAYLOAD" 2>/dev/null || true)"
+
+    local FORMATTED_CODE=""
+
+    if [[ -n "$HTTP_RESPONSE" ]]; then
+        if [[ "$IS_OPENAI_COMPATIBLE" == "true" ]]; then
+            FORMATTED_CODE="$(echo "$HTTP_RESPONSE" | jq -re '.choices[0].message.content // empty' 2>/dev/null || true)"
+        else
+            FORMATTED_CODE="$(echo "$HTTP_RESPONSE" | jq -re '.response // empty' 2>/dev/null || true)"
+        fi
+    fi
+
+    # If LLM returned empty or failed to respond, fallback to raw transcript
+    if [[ -z "${FORMATTED_CODE// }" ]]; then
+        log_warn "LLM optimization returned empty or failed. Falling back to raw transcript."
+        FORMATTED_CODE="$RAW_TRANSCRIPT"
+    fi
+
+    # --------------------------------------------------------------------------
+    # 7. Emit Formatted Output to stdout & Dispatch
+    # --------------------------------------------------------------------------
+    # stdout is captured by Cursor, VS Code, or shell redirection
+    printf "%s\n" "$FORMATTED_CODE"
+
+    # In continuous mode (-c) or if DISPATCH_METHOD=clipboard, copy to system clipboard
+    if [[ "$CONTINUOUS_MODE" == "true" || "${DISPATCH_METHOD:-stdout}" == "clipboard" ]]; then
+        dispatch_clipboard "$FORMATTED_CODE" || true
+        trigger_autopaste
+    fi
+
+    # Desktop notification (only fires in continuous mode -c)
+    local PREVIEW
+    PREVIEW="$(echo "$FORMATTED_CODE" | head -n 3)"
+    desktop_notify "✔ Code Ready (.${CLEAN_EXT})" "$PREVIEW" "normal" "accessories-text-editor"
+    return 0
+}
+
+# ------------------------------------------------------------------------------
+# 8. Execution Control (Continuous Daemon vs Single-Shot)
+# ------------------------------------------------------------------------------
+if [[ -n "$RAW_TEXT_OVERRIDE" ]]; then
+    # Raw text test/override: run once and exit
+    run_dictate_pipeline
     exit 0
 fi
 
-# Detect whether endpoint is Ollama (/api/generate) or OpenAI/LM Studio compatible (/v1)
-IS_OPENAI_COMPATIBLE=false
-if [[ "$LLM_ENDPOINT" =~ /v1(/.*)?$ ]]; then
-    IS_OPENAI_COMPATIBLE=true
-fi
-
-# Construct API Payload safely using jq
-if [[ "$IS_OPENAI_COMPATIBLE" == "true" ]]; then
-    API_URL="${LLM_ENDPOINT%/}/chat/completions"
-    # OpenAI/LM Studio payload structure:
-    # {
-    #   "model": "model_name",
-    #   "messages": [
-    #     {"role": "system", "content": "..."},
-    #     {"role": "user", "content": "..."}
-    #   ],
-    #   "temperature": 0.1,
-    #   "stream": false
-    # }
-    PAYLOAD="$(jq -n \
-        --arg model "$LLM_MODEL" \
-        --arg system "$SYSTEM_PROMPT" \
-        --arg user "$RAW_TRANSCRIPT" \
-        '{
-            model: $model,
-            messages: [
-                {role: "system", content: $system},
-                {role: "user", content: $user}
-            ],
-            temperature: 0.1,
-            stream: false
-        }')"
+if [[ "$CONTINUOUS_MODE" == "true" ]]; then
+    trap 'desktop_notify "ai-dictate-code Daemon Stopped" "Continuous dictation session ended." "low" "process-stop"; exit 0' INT TERM
+    printf "\n${COLOR_CYAN}===> Continuous Code Dictation Daemon Active (.${CLEAN_EXT})${COLOR_RESET} (Wake word: ${COLOR_CYAN}\"%s\"${COLOR_RESET}, Press Ctrl+C to stop)\n" "${WAKE_WORD:-none}" >&2
+    desktop_notify "ai-dictate-code Daemon Active" "Listening for .${CLEAN_EXT} code (Wake word: '${WAKE_WORD:-none}')..." "low" "audio-input-microphone"
+    while true; do
+        run_dictate_pipeline || true
+        sleep 0.3
+    done
 else
-    API_URL="${LLM_ENDPOINT%/}/api/generate"
-    # Ollama payload structure:
-    # {
-    #   "model": "model_name",
-    #   "prompt": "raw speech",
-    #   "system": "system prompt",
-    #   "stream": false,
-    #   "options": {"temperature": 0.1, "num_predict": 512}
-    # }
-    PAYLOAD="$(jq -n \
-        --arg model "$LLM_MODEL" \
-        --arg system "$SYSTEM_PROMPT" \
-        --arg prompt "$RAW_TRANSCRIPT" \
-        '{
-            model: $model,
-            prompt: $prompt,
-            system: $system,
-            stream: false,
-            options: {
-                temperature: 0.1,
-                num_predict: 512
-            }
-        }')"
+    run_dictate_pipeline
 fi
-
-log_info "Piping raw text to LLM (${LLM_MODEL} @ ${API_URL})..."
-
-HTTP_RESPONSE="$(curl -sS --max-time "$LLM_TIMEOUT" \
-    -X POST "$API_URL" \
-    -H "Content-Type: application/json" \
-    -d "$PAYLOAD" 2>/dev/null || true)"
-
-FORMATTED_CODE=""
-
-if [[ -n "$HTTP_RESPONSE" ]]; then
-    if [[ "$IS_OPENAI_COMPATIBLE" == "true" ]]; then
-        FORMATTED_CODE="$(echo "$HTTP_RESPONSE" | jq -re '.choices[0].message.content // empty' 2>/dev/null || true)"
-    else
-        FORMATTED_CODE="$(echo "$HTTP_RESPONSE" | jq -re '.response // empty' 2>/dev/null || true)"
-    fi
-fi
-
-# If LLM returned empty or failed to respond, fallback to raw transcript
-if [[ -z "${FORMATTED_CODE// }" ]]; then
-    log_warn "LLM optimization returned empty or failed. Falling back to raw transcript."
-    FORMATTED_CODE="$RAW_TRANSCRIPT"
-fi
-
-# ------------------------------------------------------------------------------
-# 7. Emit Formatted Output to stdout
-# ------------------------------------------------------------------------------
-# stdout is captured by Cursor, VS Code, or shell redirection
-printf "%s\n" "$FORMATTED_CODE"

@@ -52,6 +52,39 @@ log_no_speech() {
     printf "  ${COLOR_RED}✖${COLOR_RESET} ${COLOR_BOLD}[ai-dictate]${COLOR_RESET} No speech detected — ${COLOR_RED}${COLOR_BOLD}NOT LISTENING${COLOR_RESET}\n"
 }
 
+# ------------------------------------------------------------------------------
+# Desktop Notification Helper
+# ------------------------------------------------------------------------------
+desktop_notify() {
+    local title="$1"
+    local message="$2"
+    local urgency="${3:-normal}"
+    local icon="${4:-audio-input-microphone}"
+
+    # STRICT REQUIREMENT: Only notify when in continuous mode (-c) AND notifications are enabled
+    if [[ "${CONTINUOUS_MODE:-false}" != "true" || "${NOTIFY_ON_CONTINUOUS:-true}" != "true" ]]; then
+        return 0
+    fi
+
+    # Ensure DBUS address and XDG runtime are present for notifications across screens
+    if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" && -S "/run/user/$(id -u)/bus" ]]; then
+        export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
+    fi
+    if [[ -z "${XDG_RUNTIME_DIR:-}" && -d "/run/user/$(id -u)" ]]; then
+        export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+    fi
+
+    if command -v notify-send &>/dev/null; then
+        notify-send \
+            --app-name="ai-dictate" \
+            --urgency="$urgency" \
+            --expire-time="${NOTIFY_TIMEOUT_MS:-3000}" \
+            --icon="$icon" \
+            "$title" \
+            "$message" 2>/dev/null || true
+    fi
+}
+
 resolve_whisper_bin() {
     local target="${1:-whisper-cli}"
     if [[ -x "$target" ]]; then
@@ -134,7 +167,7 @@ EOF
 RECORD_ONLY=false
 TRANSCRIBE_ONLY=false
 SKIP_RECORD=false
-CONTINUOUS_MODE=false
+CONTINUOUS_MODE="${CONTINUOUS_MODE:-false}"
 INPUT_AUDIO=""
 INPUT_TEXT=""
 
@@ -302,16 +335,21 @@ run_pipeline() {
         local stripped_prompt
         if stripped_prompt="$(check_wake_word "$RAW_TRANSCRIPT" "$ww_target" "${WAKE_WORD_STRIP:-true}")"; then
             log_wake_success "$ww_target"
+            desktop_notify "✔ Wake Word Heard" "Wake word '${ww_target}' detected — optimizing prompt..." "normal" "audio-input-microphone"
             if [[ -z "$stripped_prompt" ]]; then
                 log "Wake word detected, but no command followed. Skipping."
+                desktop_notify "ai-dictate: Awaiting Prompt" "Wake word recognized, but no command followed." "low" "dialog-information"
                 return 0
             fi
             RAW_TRANSCRIPT="$stripped_prompt"
             log "Cleaned prompt (wake word stripped): \"${RAW_TRANSCRIPT}\""
         else
             log_wake_fail "$ww_target"
+            desktop_notify "✖ Wake Word Not Detected" "Heard: \"${RAW_TRANSCRIPT}\" (Expected: \"${ww_target}\")" "low" "dialog-information"
             return 0
         fi
+    else
+        desktop_notify "✔ Speech Heard" "Processing: \"${RAW_TRANSCRIPT}\"..." "normal" "audio-input-microphone"
     fi
 
     # If user requested transcribe-only, emit raw text and exit without calling LLM
@@ -325,6 +363,7 @@ run_pipeline() {
             log "Copied to macOS clipboard."
         fi
         printf "%s\n" "$RAW_TRANSCRIPT"
+        desktop_notify "✔ Transcript Ready" "$(echo "$RAW_TRANSCRIPT" | head -n 3)" "normal" "edit-copy"
         if [[ "$CONTINUOUS_MODE" != "true" ]]; then
             exit 0
         fi
@@ -395,10 +434,21 @@ print(json.dumps({
             xdotool key --clearmodifiers ctrl+v 2>/dev/null || true
         fi
     fi
+    # Desktop notification (only fires in continuous mode -c)
+    local PREVIEW
+    PREVIEW="$(echo "$FINAL_OUTPUT" | head -n 3)"
+    desktop_notify "✔ Prompt Ready" "$PREVIEW" "normal" "edit-copy"
 }
 
+if [[ -n "$INPUT_TEXT" ]]; then
+    run_pipeline
+    exit 0
+fi
+
 if [[ "$CONTINUOUS_MODE" == "true" ]]; then
+    trap 'desktop_notify "ai-dictate Daemon Stopped" "Continuous dictation session ended." "low" "process-stop"; exit 0' INT TERM
     printf "\n${COLOR_CYAN}===> Continuous Voice Daemon Active${COLOR_RESET} (Wake word: ${COLOR_CYAN}\"%s\"${COLOR_RESET}, Press Ctrl+C to stop)\n" "${WAKE_WORD:-none}"
+    desktop_notify "ai-dictate Daemon Active" "Continuous listening active (Wake word: '${WAKE_WORD:-none}')..." "low" "audio-input-microphone"
     while true; do
         run_pipeline || true
         sleep 0.3

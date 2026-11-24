@@ -133,7 +133,25 @@ WAKE_WORD_STRIP=true
 
   # Run as a continuous hands-free voice daemon:
   ai-dictate --continuous --wake-word "computer"
+
+  # Run continuous code dictation daemon for a specific language:
+  dictate.sh -c py
+  ai-dictate-code -c rs
   ```
+
+### Desktop Notifications (`-c` Mode Only)
+When working on another monitor or full-screen application away from the terminal, continuous mode (`-c` / `--continuous`) emits desktop notification banners via `notify-send` across your desktop (KDE Plasma, GNOME, Sway, Wayland/X11):
+- **Startup**: Notification indicating continuous listening is active with the expected wake word.
+- **✔ Wake Word Heard**: Instant confirmation when your wake phrase is recognized.
+- **✔ Code Ready (.ext) / Prompt Ready**: Displays the first few lines of generated code or optimized prompt when copied to clipboard.
+- **✖ Wake Word Not Detected**: Low-priority notification showing what speech was heard if the wake word was missing.
+- **Silent Single-Shot**: Single-shot executions (`ai-dictate-code py` or IDE tasks) remain strictly silent on screen, writing directly to buffer or stdout without interrupting the display.
+
+Configure in `.env`:
+```bash
+NOTIFY_ON_CONTINUOUS=true   # Enable desktop notifications in -c mode
+NOTIFY_TIMEOUT_MS=3000      # Toast duration (milliseconds)
+```
 
 ---
 
