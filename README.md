@@ -2,6 +2,9 @@
 
 > Dotfiles and environment configurations for a local and remote Whisper speech-to-text and LLM prompt optimization pipeline.
 
+A special thanks to https://github.com/tavisrudd for their pycon talk in  2013 (during which I was in middle school) showcasing dictation for programming and the state of the art then. This project would not exist if it was not because of you <3.
+
+
 `ai_dotfiles` provides a modular, reproducible infrastructure for streaming low-latency voice dictation into local or home-server LLM inference pipelines (Ollama / LM Studio), resolving domain homophones with dynamic context switching, and directly injecting optimized code and structured prompts into **Cursor** and **VS Code**.
 
 ---

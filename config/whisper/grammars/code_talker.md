@@ -113,3 +113,68 @@ To eliminate recognition slur and speech fatigue during high-speed coding, the p
 | `clan <name>` | `class <name>` | `class <name>:` / `class <name> {` | Archetype classification group |
 | `port <name>` | `interface <name>` | `interface <name> {` | Standardized docking interface |
 
+---
+
+## 6. Chained Constructs & Intent-Driven Dictation
+
+To avoid micromanaging low-level AST tokens (e.g. spelling out colons, brackets, arrows, and boolean gates one by one), the pipeline supports **Chained Intent Dictation**. This collapses multi-statement functions into dense, single-breath utterances.
+
+### Compound Chaining Patterns
+
+| Spoken Chaining Pattern | Target Expansion (Language Idiomatic) | Purpose |
+| :--- | :--- | :--- |
+| `guard <var> [fail\|breach] <msg>` | `if not <var>:`<br>&nbsp;&nbsp;&nbsp;&nbsp;`raise ValueError("<msg>")` | Collapses condition check + raise into 5 words |
+| `guard <var>` (implicit fail) | `if not <var>:`<br>&nbsp;&nbsp;&nbsp;&nbsp;`raise ValueError("<var> required")` | Invariant assertion / parameter check |
+| `[fn\|def\|core] <name> with <p1> <t1> ... to <ret>` | `def <name>(<p1>: <t1>) -> <ret>:` /<br>`fn <name>(<p1>: <t1>) -> <ret> {` | Positional parameter-type pairs without `slot`/`form` |
+| `return format <text and vars>` /<br>`return <text and vars> formatted` | `return f"<text> {<var>}"` (Python)<br>`return \`<text> \${<var>}\`;` (TS)<br>`Ok(format!("<text> {}", <var>))` (Rust) | Auto-detects identifier interpolation |
+
+---
+
+### Before vs. After Comparison
+
+#### Traditional / Token-by-Token Dictation (24 words):
+```text
+core fetch user by id slot id form count yield strand
+test id bang pulse                       
+    flare breach user not found
+yield strand user id
+```
+
+#### Chained Intent Dictation (11-14 words — 50%+ reduction):
+```text
+fn fetch user by id with id int guard id return user id formatted
+```
+*or using Sci-Fi codewords:*
+```text
+core fetch user by id with id count to strand guard id breach user not found yield strand user id
+```
+
+#### Compiled Output (Python):
+```python
+def fetch_user_by_id(id: int) -> str:
+    if not id:
+        raise ValueError("user not found")
+    return f"user {id}"
+```
+
+#### Compiled Output (Rust):
+```rust
+fn fetch_user_by_id(id: i64) -> Result<String, Error> {
+    if id == 0 {
+        return Err(anyhow!("user not found"));
+    }
+    Ok(format!("user {}", id))
+}
+```
+
+#### Compiled Output (TypeScript):
+```typescript
+function fetchUserById(id: number): string {
+    if (!id) {
+        throw new Error("user not found");
+    }
+    return `user ${id}`;
+}
+```
+
+

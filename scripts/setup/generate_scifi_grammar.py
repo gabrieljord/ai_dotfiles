@@ -87,7 +87,7 @@ SCIFI_MONOSYLLABLES = sorted(list(set([
     "fixed", "breach", "bus", "cast", "chain", "chart", "crate", "drive", "etch", "flip",
     "graft", "grant", "isle", "last", "left", "log", "loop", "mold", "mount", "out",
     "pick", "plug", "plus", "point", "read", "right", "rust", "sharp", "sheet", "solve",
-    "swift", "tag", "task", "thing", "twin"
+    "swift", "tag", "task", "thing", "twin", "guard", "with", "to", "fail"
 ])))
 
 # Load system dictionary for verified real English words
@@ -162,6 +162,10 @@ CURATED_MAPPINGS = {
     "raise": ("flare", "Error Handling", "Signal alert flare"),
     "panic": ("scram", "Error Handling", "Emergency reactor scram"),
     "assert": ("clinch", "Error Handling", "Invariant lock verification"),
+    "guard": ("guard", "Control Flow", "Compound invariant check (if not condition)"),
+    "fail": ("breach", "Error Handling", "Throw / raise exception with message"),
+    "with": ("with", "Declarations", "Positional parameter sequence initiator"),
+    "to": ("to", "Declarations", "Return type arrow initiator"),
     
     # Types & Primitives
     "string": ("strand", "Data Types", "Linear peptide/nanowire strand"),
@@ -553,6 +557,9 @@ def main():
         ("Memory", "purge", "free / delete", "Vent exhausted memory"),
         ("Errors", "scram", "panic! / fatal", "Emergency reactor scram"),
         ("Errors", "breach", "throw / exception", "Hull breach exception handler"),
+        ("Chained Intent", "guard <var> fail <msg>", "if not <var>: raise Error(<msg>)", "Compound guard clause check and raise"),
+        ("Chained Intent", "with <p1> <t1> to <ret>", "(<p1>: <t1>) -> <ret>", "Chained typed parameter-return sequence"),
+        ("Chained Intent", "return format <msg>", "return f'<msg> {var}'", "Auto-interpolated string return"),
     ]
     for cat, trig, exp, mean in core_samples:
         md_lines.append(f"| {cat} | `{trig}` | `{exp}` | {mean} |")

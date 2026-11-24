@@ -2395,13 +2395,13 @@
   },
   "F": {
     "word": "F",
-    "trigger": "fall",
+    "trigger": "fail",
     "category": "General Lexicon",
     "rationale": "Acoustic nearest neighbor for 'F'"
   },
   "f64": {
     "word": "f64",
-    "trigger": "fall",
+    "trigger": "fail",
     "category": "General Lexicon",
     "rationale": "Acoustic nearest neighbor for 'f64'"
   },
@@ -2413,15 +2413,15 @@
   },
   "Factor": {
     "word": "Factor",
-    "trigger": "fall",
+    "trigger": "fail",
     "category": "Phonetic",
-    "rationale": "Phonetic prefix match 'fa' -> fall"
+    "rationale": "Phonetic prefix match 'fa' -> fail"
   },
   "fail": {
     "word": "fail",
-    "trigger": "fail",
-    "category": "Primitives",
-    "rationale": "Direct single-syllable match 'fail'"
+    "trigger": "breach",
+    "category": "Error Handling",
+    "rationale": "Throw / raise exception with message"
   },
   "False": {
     "word": "False",
@@ -2437,15 +2437,15 @@
   },
   "Fancy": {
     "word": "Fancy",
-    "trigger": "fall",
+    "trigger": "fail",
     "category": "Phonetic",
-    "rationale": "Phonetic prefix match 'fa' -> fall"
+    "rationale": "Phonetic prefix match 'fa' -> fail"
   },
   "Fantom": {
     "word": "Fantom",
-    "trigger": "fall",
+    "trigger": "fail",
     "category": "Phonetic",
-    "rationale": "Phonetic prefix match 'fa' -> fall"
+    "rationale": "Phonetic prefix match 'fa' -> fail"
   },
   "Faust": {
     "word": "Faust",
@@ -3092,8 +3092,8 @@
   "guard": {
     "word": "guard",
     "trigger": "guard",
-    "category": "Primitives",
-    "rationale": "Direct single-syllable match 'guard'"
+    "category": "Control Flow",
+    "rationale": "Compound invariant check (if not condition)"
   },
   "Guidance": {
     "word": "Guidance",
@@ -7448,14 +7448,14 @@
   "to": {
     "word": "to",
     "trigger": "to",
-    "category": "Primitives",
-    "rationale": "Direct single-syllable match 'to'"
+    "category": "Declarations",
+    "rationale": "Return type arrow initiator"
   },
   "todo": {
     "word": "todo",
-    "trigger": "tone",
+    "trigger": "to",
     "category": "Phonetic",
-    "rationale": "Phonetic prefix match 'to' -> tone"
+    "rationale": "Phonetic prefix match 'to' -> to"
   },
   "Toit": {
     "word": "Toit",
@@ -7465,15 +7465,15 @@
   },
   "token": {
     "word": "token",
-    "trigger": "tone",
+    "trigger": "to",
     "category": "Phonetic",
-    "rationale": "Phonetic prefix match 'to' -> tone"
+    "rationale": "Phonetic prefix match 'to' -> to"
   },
   "Tolk": {
     "word": "Tolk",
-    "trigger": "tone",
+    "trigger": "to",
     "category": "Phonetic",
-    "rationale": "Phonetic prefix match 'to' -> tone"
+    "rationale": "Phonetic prefix match 'to' -> to"
   },
   "TOML": {
     "word": "TOML",
@@ -8107,21 +8107,21 @@
   },
   "Witcher": {
     "word": "Witcher",
-    "trigger": "wing",
+    "trigger": "with",
     "category": "Phonetic",
-    "rationale": "Phonetic prefix match 'wi' -> wing"
+    "rationale": "Phonetic prefix match 'wit' -> with"
   },
   "with": {
     "word": "with",
     "trigger": "with",
-    "category": "Primitives",
-    "rationale": "Direct single-syllable match 'with'"
+    "category": "Declarations",
+    "rationale": "Positional parameter sequence initiator"
   },
   "without": {
     "word": "without",
-    "trigger": "wing",
+    "trigger": "with",
     "category": "Phonetic",
-    "rationale": "Phonetic prefix match 'wi' -> wing"
+    "rationale": "Phonetic prefix match 'with' -> with"
   },
   "Wolfram": {
     "word": "Wolfram",

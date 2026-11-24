@@ -58,6 +58,9 @@ When dictating code in Cursor / VS Code:
 | Memory | `purge` | `free / delete` | Vent exhausted memory |
 | Errors | `scram` | `panic! / fatal` | Emergency reactor scram |
 | Errors | `breach` | `throw / exception` | Hull breach exception handler |
+| Chained Intent | `guard <var> fail <msg>` | `if not <var>: raise Error(<msg>)` | Compound guard clause check and raise |
+| Chained Intent | `with <p1> <t1> to <ret>` | `(<p1>: <t1>) -> <ret>` | Chained typed parameter-return sequence |
+| Chained Intent | `return format <msg>` | `return f'<msg> {var}'` | Auto-interpolated string return |
 
 ---
 
@@ -466,15 +469,15 @@ The following table maps all **1392 distinct words** extracted from `config/prom
 | `extension` | `etch` | General Lexicon | Acoustic nearest neighbor for 'extension' |
 | `extern` | `out` | Modifiers | External off-ship link |
 | `external` | `etch` | General Lexicon | Acoustic nearest neighbor for 'external' |
-| `F` | `fall` | General Lexicon | Acoustic nearest neighbor for 'F' |
-| `f64` | `fall` | General Lexicon | Acoustic nearest neighbor for 'f64' |
+| `F` | `fail` | General Lexicon | Acoustic nearest neighbor for 'F' |
+| `f64` | `fail` | General Lexicon | Acoustic nearest neighbor for 'f64' |
 | `fact` | `fact` | Primitives | Direct single-syllable match 'fact' |
-| `Factor` | `fall` | Phonetic | Phonetic prefix match 'fa' -> fall |
-| `fail` | `fail` | Primitives | Direct single-syllable match 'fail' |
+| `Factor` | `fail` | Phonetic | Phonetic prefix match 'fa' -> fail |
+| `fail` | `breach` | Error Handling | Throw / raise exception with message |
 | `False` | `dead` | Data Types | Zero low ground state |
 | `false` | `dead` | Data Types | Zero low ground state |
-| `Fancy` | `fall` | Phonetic | Phonetic prefix match 'fa' -> fall |
-| `Fantom` | `fall` | Phonetic | Phonetic prefix match 'fa' -> fall |
+| `Fancy` | `fail` | Phonetic | Phonetic prefix match 'fa' -> fail |
+| `Fantom` | `fail` | Phonetic | Phonetic prefix match 'fa' -> fail |
 | `Faust` | `faust` | Primitives | Direct single-syllable match 'faust' |
 | `FC` | `fc` | Primitives | Direct single-syllable match 'fc' |
 | `felt252` | `feed` | Phonetic | Phonetic prefix match 'fe' -> feed |
@@ -582,7 +585,7 @@ The following table maps all **1392 distinct words** extracted from `config/prom
 | `Groovy` | `grade` | Phonetic | Phonetic prefix match 'gr' -> grade |
 | `group` | `group` | Primitives | Direct single-syllable match 'group' |
 | `GSC` | `gsc` | Primitives | Direct single-syllable match 'gsc' |
-| `guard` | `guard` | Primitives | Direct single-syllable match 'guard' |
+| `guard` | `guard` | Control Flow | Compound invariant check (if not condition) |
 | `Guidance` | `guide` | Phonetic | Phonetic prefix match 'guid' -> guide |
 | `h` | `hack` | General Lexicon | Acoustic nearest neighbor for 'h' |
 | `Hack` | `hack` | Primitives | Direct single-syllable match 'hack' |
@@ -1308,11 +1311,11 @@ The following table maps all **1392 distinct words** extracted from `config/prom
 | `title` | `title` | Primitives | Direct single-syllable match 'title' |
 | `TL` | `tl` | Primitives | Direct single-syllable match 'tl' |
 | `TLA` | `tla` | Primitives | Direct single-syllable match 'tla' |
-| `to` | `to` | Primitives | Direct single-syllable match 'to' |
-| `todo` | `tone` | Phonetic | Phonetic prefix match 'to' -> tone |
+| `to` | `to` | Declarations | Return type arrow initiator |
+| `todo` | `to` | Phonetic | Phonetic prefix match 'to' -> to |
 | `Toit` | `toit` | Primitives | Direct single-syllable match 'toit' |
-| `token` | `tone` | Phonetic | Phonetic prefix match 'to' -> tone |
-| `Tolk` | `tone` | Phonetic | Phonetic prefix match 'to' -> tone |
+| `token` | `to` | Phonetic | Phonetic prefix match 'to' -> to |
+| `Tolk` | `to` | Phonetic | Phonetic prefix match 'to' -> to |
 | `TOML` | `chart` | Data Format | Configuration parameter table |
 | `tr` | `tr` | Primitives | Direct single-syllable match 'tr' |
 | `trait` | `gene` | OOP & Types | Genetic behavior trait |
@@ -1418,9 +1421,9 @@ The following table maps all **1392 distinct words** extracted from `config/prom
 | `wildcard` | `wing` | Phonetic | Phonetic prefix match 'wi' -> wing |
 | `wire` | `wire` | Primitives | Direct single-syllable match 'wire' |
 | `wisp` | `wisp` | Primitives | Direct single-syllable match 'wisp' |
-| `Witcher` | `wing` | Phonetic | Phonetic prefix match 'wi' -> wing |
-| `with` | `with` | Primitives | Direct single-syllable match 'with' |
-| `without` | `wing` | Phonetic | Phonetic prefix match 'wi' -> wing |
+| `Witcher` | `with` | Phonetic | Phonetic prefix match 'wit' -> with |
+| `with` | `with` | Declarations | Positional parameter sequence initiator |
+| `without` | `with` | Phonetic | Phonetic prefix match 'with' -> with |
 | `Wolfram` | `wall` | General Lexicon | Acoustic nearest neighbor for 'Wolfram' |
 | `Wollok` | `wake` | General Lexicon | Acoustic nearest neighbor for 'Wollok' |
 | `WORKDIR` | `ward` | General Lexicon | Acoustic nearest neighbor for 'WORKDIR' |
