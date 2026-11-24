@@ -358,5 +358,29 @@ systemctl --user enable --now whisper-server.service
 
 ---
 
+## Useage and CLI Examples
+
+Verified Examples & Usage
+  
+    # 1. Python Code Dictation via v2 Pipeline
+    dictate_v2.sh py --raw-text "spark fetch user thin arrow drift" --no-wake-word
+    # Output on stdout:
+    # def fetch_user() -> float:
+    #     pass
+  
+    # 2. Rust Code Dictation via v2 Pipeline
+    dictate_v2.sh rs --raw-text "spark fetch user thin arrow drift" --no-wake-word
+    # Output on stdout:
+    # pub fn fetch_user() -> f32 {
+    #     todo!()
+    # }
+  
+    # 3. Direct UNIX Pipeline
+    echo "spark fetch user thin arrow drift" | ai-encoder | ai-decoder --ext py | ai-validator --ext py          
+  
+    # 4. Transcribe from an Audio File
+    dictate_v2.sh py /path/to/recording.wav
+
+
 ## License
 MIT License.
