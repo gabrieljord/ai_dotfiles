@@ -338,18 +338,14 @@ run_pipeline() {
             desktop_notify "✔ Wake Word Heard" "Wake word '${ww_target}' detected — optimizing prompt..." "normal" "audio-input-microphone"
             if [[ -z "$stripped_prompt" ]]; then
                 log "Wake word detected, but no command followed. Skipping."
-                desktop_notify "ai-dictate: Awaiting Prompt" "Wake word recognized, but no command followed." "low" "dialog-information"
                 return 0
             fi
             RAW_TRANSCRIPT="$stripped_prompt"
             log "Cleaned prompt (wake word stripped): \"${RAW_TRANSCRIPT}\""
         else
             log_wake_fail "$ww_target"
-            desktop_notify "✖ Wake Word Not Detected" "Heard: \"${RAW_TRANSCRIPT}\" (Expected: \"${ww_target}\")" "low" "dialog-information"
             return 0
         fi
-    else
-        desktop_notify "✔ Speech Heard" "Processing: \"${RAW_TRANSCRIPT}\"..." "normal" "audio-input-microphone"
     fi
 
     # If user requested transcribe-only, emit raw text and exit without calling LLM
@@ -446,9 +442,7 @@ if [[ -n "$INPUT_TEXT" ]]; then
 fi
 
 if [[ "$CONTINUOUS_MODE" == "true" ]]; then
-    trap 'desktop_notify "ai-dictate Daemon Stopped" "Continuous dictation session ended." "low" "process-stop"; exit 0' INT TERM
     printf "\n${COLOR_CYAN}===> Continuous Voice Daemon Active${COLOR_RESET} (Wake word: ${COLOR_CYAN}\"%s\"${COLOR_RESET}, Press Ctrl+C to stop)\n" "${WAKE_WORD:-none}"
-    desktop_notify "ai-dictate Daemon Active" "Continuous listening active (Wake word: '${WAKE_WORD:-none}')..." "low" "audio-input-microphone"
     while true; do
         run_pipeline || true
         sleep 0.3

@@ -140,12 +140,10 @@ WAKE_WORD_STRIP=true
   ```
 
 ### Desktop Notifications (`-c` Mode Only)
-When working on another monitor or full-screen application away from the terminal, continuous mode (`-c` / `--continuous`) emits desktop notification banners via `notify-send` across your desktop (KDE Plasma, GNOME, Sway, Wayland/X11):
-- **Startup**: Notification indicating continuous listening is active with the expected wake word.
-- **✔ Wake Word Heard**: Instant confirmation when your wake phrase is recognized.
-- **✔ Code Ready (.ext) / Prompt Ready**: Displays the first few lines of generated code or optimized prompt when copied to clipboard.
-- **✖ Wake Word Not Detected**: Low-priority notification showing what speech was heard if the wake word was missing.
-- **Silent Single-Shot**: Single-shot executions (`ai-dictate-code py` or IDE tasks) remain strictly silent on screen, writing directly to buffer or stdout without interrupting the display.
+When working on another monitor or full-screen application away from the terminal, continuous mode (`-c` / `--continuous`) emits non-intrusive notification banners via `notify-send` strictly for meaningful events:
+- **✔ Wake Word Heard**: Instant notification when your spoken wake word is recognized and code/prompt capture begins.
+- **✔ Code Ready (.ext) / Prompt Ready**: Notification displaying the first lines of generated code or optimized prompt when processing completes and output is copied to the clipboard.
+- **Silent Elsewhere**: Startup, shutdown, ambient silence, and speech without a wake word remain silent to eliminate desktop spam. Single-shot executions (`ai-dictate-code py` or IDE shortcuts) also remain completely silent on screen.
 
 Configure in `.env`:
 ```bash

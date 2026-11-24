@@ -456,18 +456,14 @@ run_dictate_pipeline() {
             desktop_notify "✔ Wake Word Heard" "Wake word '${WAKE_WORD_SETTING}' detected — listening (.${CLEAN_EXT})..." "normal" "audio-input-microphone"
             if [[ -z "$STRIPPED_PROMPT" ]]; then
                 log_warn "Wake word detected, but no code command followed. Skipping."
-                desktop_notify "ai-dictate-code: Awaiting Code" "Wake word recognized, but no code command followed." "low" "dialog-information"
                 return 0
             fi
             RAW_TRANSCRIPT="$STRIPPED_PROMPT"
             log_info "Cleaned speech (wake word stripped): \"${RAW_TRANSCRIPT}\""
         else
             log_wake_fail "$WAKE_WORD_SETTING"
-            desktop_notify "✖ Wake Word Not Detected" "Heard: \"${RAW_TRANSCRIPT}\" (Expected: \"${WAKE_WORD_SETTING}\")" "low" "dialog-information"
             return 0
         fi
-    else
-        desktop_notify "✔ Speech Heard" "Processing: \"${RAW_TRANSCRIPT}\" (.${CLEAN_EXT})..." "normal" "audio-input-microphone"
     fi
 
     # --------------------------------------------------------------------------
@@ -659,9 +655,7 @@ if [[ -n "$RAW_TEXT_OVERRIDE" ]]; then
 fi
 
 if [[ "$CONTINUOUS_MODE" == "true" ]]; then
-    trap 'desktop_notify "ai-dictate-code Daemon Stopped" "Continuous dictation session ended." "low" "process-stop"; exit 0' INT TERM
     printf "\n${COLOR_CYAN}===> Continuous Code Dictation Daemon Active (.${CLEAN_EXT})${COLOR_RESET} (Wake word: ${COLOR_CYAN}\"%s\"${COLOR_RESET}, Press Ctrl+C to stop)\n" "${WAKE_WORD:-none}" >&2
-    desktop_notify "ai-dictate-code Daemon Active" "Listening for .${CLEAN_EXT} code (Wake word: '${WAKE_WORD:-none}')..." "low" "audio-input-microphone"
     while true; do
         run_dictate_pipeline || true
         sleep 0.3
