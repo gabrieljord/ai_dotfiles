@@ -1,1 +1,0 @@
-/home/blujay/code/ai_dotfiles/scripts/dictate.sh

@@ -19,3 +19,12 @@ Thumbs.db
 *~
 .idea/
 .vscode/
+
+# Generated Convenience Symlinks (created by setup.sh & install.sh)
+/dictate.sh
+/transcribe.sh
+/record.py
+/whisper
+/prompts
+config/whisper/grammers
+config/.env

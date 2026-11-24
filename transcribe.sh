@@ -1,1 +1,0 @@
-/home/blujay/code/ai_dotfiles/scripts/pipeline/transcribe_and_optimize.sh
