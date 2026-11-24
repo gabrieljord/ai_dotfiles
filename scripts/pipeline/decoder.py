@@ -17,6 +17,7 @@ import os
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
@@ -69,8 +70,14 @@ def load_env_variables() -> Dict[str, str]:
 LOADED_ENV = load_env_variables()
 
 # Configuration defaults from .env
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
 OLLAMA_ENDPOINT = os.environ.get("LOCAL_LLM_ENDPOINT", "http://localhost:11434").rstrip("/")
 OLLAMA_MODEL = os.environ.get("LLM_MODEL_NAME", "llama3:8b-instruct-q8_0")
+DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
+GEMINI_ENDPOINT = os.environ.get(
+    "GEMINI_API_ENDPOINT", "https://generativelanguage.googleapis.com/v1beta"
+).rstrip("/")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "") or os.environ.get("LLM_API_KEY", "")
 LLM_TIMEOUT = float(os.environ.get("LLM_TIMEOUT_SECONDS", "15"))
 
 SYSTEM_PROMPT = (
@@ -234,18 +241,127 @@ def deterministic_fallback_codegen(ir: Dict[str, Any], ext: str) -> str:
     return str(ir)
 
 
+def _post_json(
+    url: str,
+    payload: Dict[str, Any],
+    headers: Dict[str, str],
+    timeout: float,
+) -> Dict[str, Any]:
+    """Send a JSON POST request and return the parsed JSON response."""
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def call_ollama(
+    user_prompt: str,
+    target_endpoint: str,
+    target_model: str,
+    timeout: float,
+) -> Optional[str]:
+    """Query the local/remote Ollama /api/generate endpoint."""
+    payload = {
+        "model": target_model,
+        "prompt": user_prompt,
+        "system": SYSTEM_PROMPT,
+        "stream": False,
+        "options": {
+            "temperature": 0.0,  # Strict deterministic output
+            "num_predict": 512,
+        },
+    }
+    api_url = f"{target_endpoint}/api/generate"
+
+    try:
+        resp_json = _post_json(
+            api_url,
+            payload,
+            headers={"Content-Type": "application/json"},
+            timeout=timeout,
+        )
+        raw_output = resp_json.get("response", "")
+        if raw_output:
+            return strip_markdown_fences(raw_output)
+    except urllib.error.URLError as e:
+        print(f"[decoder] WARN: Ollama connection to {api_url} failed: {e}. Utilizing deterministic fallback.", file=sys.stderr)
+    except Exception as e:
+        print(f"[decoder] WARN: Decoder error querying Ollama: {e}. Utilizing deterministic fallback.", file=sys.stderr)
+
+    return None
+
+
+def call_gemini(
+    user_prompt: str,
+    target_model: str,
+    api_key: str,
+    timeout: float,
+    base_endpoint: str = GEMINI_ENDPOINT,
+) -> Optional[str]:
+    """Query the Google Gemini generateContent REST API."""
+    if not api_key:
+        print("[decoder] WARN: GEMINI_API_KEY is not set. Utilizing deterministic fallback.", file=sys.stderr)
+        return None
+
+    encoded_model = urllib.parse.quote(target_model, safe="")
+    api_url = f"{base_endpoint}/models/{encoded_model}:generateContent"
+    payload = {
+        "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+        "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
+        "generationConfig": {
+            "temperature": 0.0,
+            "maxOutputTokens": 512,
+        },
+    }
+
+    try:
+        resp_json = _post_json(
+            api_url,
+            payload,
+            headers={
+                "Content-Type": "application/json",
+                "x-goog-api-key": api_key,
+            },
+            timeout=timeout,
+        )
+        candidates = resp_json.get("candidates") or []
+        if candidates:
+            parts = (candidates[0].get("content") or {}).get("parts") or []
+            raw_output = "".join(part.get("text", "") for part in parts)
+            if raw_output:
+                return strip_markdown_fences(raw_output)
+        print("[decoder] WARN: Gemini response contained no text candidates. Utilizing deterministic fallback.", file=sys.stderr)
+    except urllib.error.HTTPError as e:
+        err_body = ""
+        try:
+            err_body = e.read().decode("utf-8", errors="replace").strip()
+        except Exception:
+            pass
+        detail = f" ({err_body})" if err_body else ""
+        print(f"[decoder] WARN: Gemini API HTTP {e.code} error: {e.reason}{detail}. Utilizing deterministic fallback.", file=sys.stderr)
+    except urllib.error.URLError as e:
+        print(f"[decoder] WARN: Gemini connection failed: {e}. Utilizing deterministic fallback.", file=sys.stderr)
+    except Exception as e:
+        print(f"[decoder] WARN: Decoder error querying Gemini: {e}. Utilizing deterministic fallback.", file=sys.stderr)
+
+    return None
+
+
 def decode(
     ir: Union[Dict[str, Any], str],
     ext: str,
     correction: Optional[str] = None,
     endpoint: Optional[str] = None,
     model: Optional[str] = None,
+    provider: Optional[str] = None,
 ) -> str:
     """
-    Translates JSON AST into clean source code for the given extension via Ollama API.
+    Translates JSON AST into clean source code for the given extension via the configured LLM provider.
     """
+    target_provider = (provider or os.environ.get("LLM_PROVIDER", LLM_PROVIDER)).strip().lower()
     target_endpoint = (endpoint or OLLAMA_ENDPOINT).rstrip("/")
-    target_model = model or OLLAMA_MODEL
+    default_model = DEFAULT_GEMINI_MODEL if target_provider == "gemini" else OLLAMA_MODEL
+    target_model = model or os.environ.get("LLM_MODEL_NAME") or default_model
     clean_ext = ext.lower().lstrip(".")
     lang_name = resolve_language_name(clean_ext)
 
@@ -276,39 +392,16 @@ def decode(
 
     user_prompt = "\n".join(prompt_parts)
 
-    payload = {
-        "model": target_model,
-        "prompt": user_prompt,
-        "system": SYSTEM_PROMPT,
-        "stream": False,
-        "options": {
-            "temperature": 0.0,  # Strict deterministic output
-            "num_predict": 512,
-        },
-    }
+    if target_provider == "gemini":
+        api_key = os.environ.get("GEMINI_API_KEY", "") or os.environ.get("LLM_API_KEY", "") or GEMINI_API_KEY
+        decoded = call_gemini(user_prompt, target_model, api_key, LLM_TIMEOUT)
+    else:
+        decoded = call_ollama(user_prompt, target_endpoint, target_model, LLM_TIMEOUT)
 
-    api_url = f"{target_endpoint}/api/generate"
+    if decoded is not None:
+        return decoded
 
-    try:
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            api_url,
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=LLM_TIMEOUT) as resp:
-            resp_body = resp.read().decode("utf-8")
-            resp_json = json.loads(resp_body)
-            raw_output = resp_json.get("response", "")
-            if raw_output:
-                return strip_markdown_fences(raw_output)
-    except urllib.error.URLError as e:
-        print(f"[decoder] WARN: Ollama connection to {api_url} failed: {e}. Utilizing deterministic fallback.", file=sys.stderr)
-    except Exception as e:
-        print(f"[decoder] WARN: Decoder error querying Ollama: {e}. Utilizing deterministic fallback.", file=sys.stderr)
-
-    # Fallback when Ollama service is unreachable
+    # Fallback when LLM service is unreachable or unconfigured
     return deterministic_fallback_codegen(ir_dict, clean_ext)
 
 
@@ -317,8 +410,9 @@ def main() -> None:
     parser.add_argument("input_data", nargs="?", default="", help="JSON AST string or file path")
     parser.add_argument("-e", "--ext", default="py", help="Target file extension (e.g. py, rs, ts)")
     parser.add_argument("--correction", default=None, help="Linter correction prompt for retries")
-    parser.add_argument("--model", default=None, help="Override Ollama model name")
+    parser.add_argument("--model", default=None, help="Override LLM model name")
     parser.add_argument("--endpoint", default=None, help="Override Ollama API endpoint")
+    parser.add_argument("--provider", default=None, help="Override LLM provider (ollama or gemini)")
     args = parser.parse_args()
 
     input_data = args.input_data
@@ -341,6 +435,7 @@ def main() -> None:
         correction=args.correction,
         endpoint=args.endpoint,
         model=args.model,
+        provider=args.provider,
     )
     print(code)
 
