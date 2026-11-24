@@ -13,28 +13,30 @@ A special thanks to https://github.com/tavisrudd for their pycon talk in  2013 (
 
 ```mermaid
 flowchart TD
-    subgraph IDE["Developer Workspace (Cursor / VS Code)"]
-        ACTIVE["Active Buffer (e.g. main.py, lib.rs)"] --> EXT["Extract File Extension\n(\${fileExtname}: py, rs, ts)"]
-        EXT --> DICTATE["scripts/dictate.sh"]
-        STDOUT["Clean Code (stdout)"] -.->|Direct Buffer Insert| ACTIVE
+    subgraph AudioSTT["Audio Capture & Speech-to-Text"]
+        MIC["Microphone / WAV File"] --> VAD["record_until_silence.py\n(Dynamic Silence VAD)"]
+        VAD --> WCPP["whisper-cli (-ng)\n(ggml-tiny.en.bin)"]
+        WCPP --> RAW["Raw Spoken Text\n('spark fetch user thin arrow drift')"]
     end
 
-    subgraph WhisperEngine["Whisper.cpp (STT / CPU-Only)"]
-        WAV["Input Audio WAV\n(/tmp/ai_dotfiles/input_recording.wav)"] --> WCPP["whisper-cli (-ngl 0)"]
-        PROMPTS["config/prompts/lang_prompts.env\n(Domain Vocabulary Primer)"] -->|--prompt| WCPP
-        WCPP --> RAW["Raw Spoken Text\n(Homophones Resolved)"]
+    subgraph Autoencoder["Deterministic Voice Autoencoder (scripts/pipeline/encoder.py)"]
+        RAW --> LEX["whisper/grammars/scifi_lexicon.json\n(Deterministic Rules & Triggers)"]
+        LEX --> SM["State-Machine AST Parser"]
+        SM --> AST["Strict JSON AST (Intermediate Representation)\n{'intent': 'function_declaration', 'name': 'fetch_user', 'returns': 'float', 'body': []}"]
     end
 
-    subgraph LLMEngine["Local LLM Compiler (Ollama / LM Studio)"]
-        RAW --> CURL["curl & jq API Pipeline"]
-        GRAMMARS["whisper/grammars/*.md\n(code_talker & boilerplate rules)"] -->|System Prompt| CURL
-        CURL --> LLM["Llama 3 / Mistral / Custom Model"]
-        LLM --> STDOUT
+    subgraph LLMDecoder["LLM Syntax Decoder (scripts/pipeline/decoder.py)"]
+        AST --> OLLAMA["Ollama API (/api/generate)\nSystem: 'You are a syntax compiler...'"]
+        OLLAMA --> CODE["Raw Target Code\n(Python, Rust, TypeScript, etc.)"]
     end
 
-    DICTATE --> WAV
-    DICTATE --> PROMPTS
-    DICTATE --> CURL
+    subgraph ValidatorLoop["Subprocess Linter & Retry Loop (scripts/pipeline/validator.py)"]
+        CODE --> LINTER{"Local Linter Subprocess\n(.py: py_compile / ruff\n.rs: rustfmt\n.ts/.js: biome)"}
+        LINTER -->|Exit 0: Valid| STDOUT["stdout / Active Editor Buffer"]
+        LINTER -->|Exit != 0: Syntax Error| RETRY{"Retry < 2?"}
+        RETRY -->|Yes: Feed stderr back to Decoder| OLLAMA
+        RETRY -->|No: Hardcap reached| COMMENT["Commented Linter Error + Last Code"] --> STDOUT
+    end
 ```
 
 ---
@@ -46,6 +48,7 @@ ai_dotfiles/
 ├── .env.example               # Full template for local/remote pipeline configurations
 ├── .gitignore                 # Ignores local secrets, audio buffers, and model weights
 ├── install.sh                 # Safe, idempotent bootstrap installer & link manager
+├── setup.sh                   # Master orchestration setup script
 ├── README.md                  # System documentation & setup guide
 ├── whisper -> config/whisper  # Root symlink for grammar & config discovery
 ├── prompts -> config/prompts  # Root symlink for language prompts discovery
@@ -54,6 +57,8 @@ ai_dotfiles/
 │   │   ├── whisper.conf       # Audio parameters, thread counts, and model profiles
 │   │   └── grammars/          # Spoken grammar specifications in Markdown
 │   │       ├── code_talker.md # Casing styles, operators, punctuation, control flow
+│   │       ├── scifi_lexicon.md # 1,392 monosyllabic sci-fi keyword triggers
+│   │       ├── scifi_lexicon.json # Machine-readable keyword lookup table
 │   │       └── boilerplate.md # Macros: dates (american date today), templates, git
 │   ├── prompts/
 │   │   └── lang_prompts.env   # 595 languages & 1,840+ extension/alias Whisper prompts
@@ -65,12 +70,19 @@ ai_dotfiles/
 │       ├── tasks.json         # VS Code / Cursor task passing ${fileExtname}
 │       └── keybindings.json   # IDE hotkey mapping (Ctrl+Alt+D)
 ├── scripts/
-│   ├── dictate.sh             # Core dynamic context & LLM piping pipeline (stdout)
+│   ├── dictate.sh             # Classic dynamic context & LLM piping pipeline (stdout)
+│   ├── dictate_v2.sh          # Autoencoder/Decoder & validated AST pipeline (stdout)
+│   ├── audio/
+│   │   └── record_until_silence.py # Dynamic voice activity & silence detection recorder
 │   ├── pipeline/
-│   │   └── transcribe_and_optimize.sh # General dictation & clipboard/auto-paste runner
+│   │   ├── encoder.py         # Phase 1: Deterministic State-Machine AST Parser (JSON IR)
+│   │   ├── decoder.py         # Phase 2: LLM Syntax Compiler (Ollama API)
+│   │   ├── validator.py       # Phase 3: Subprocess Linter & Retry Loop
+│   │   └── transcribe_and_optimize.sh # General voice dictation daemon runner
 │   └── setup/
 │       ├── setup_whisper_cpp.sh       # Automated build & model downloader
 │       ├── generate_lang_prompts.py   # Regenerates lang_prompts.env from Linguist
+│       ├── generate_scifi_grammar.py  # Regenerates scifi_lexicon.json and scifi_lexicon.md
 │       └── languages.yml              # Canonical GitHub Linguist language specs
 └── systemd/
     └── whisper-server.service.example # Systemd unit file for headless home servers

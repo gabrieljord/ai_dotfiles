@@ -162,8 +162,12 @@ create_symlink "grammars" "${SCRIPT_DIR}/config/whisper/grammers"
 # 3. Link pipeline binaries into ~/.local/bin
 create_symlink "${SCRIPT_DIR}/scripts/pipeline/transcribe_and_optimize.sh" "${TARGET_BIN_DIR}/ai-dictate"
 create_symlink "${SCRIPT_DIR}/scripts/dictate.sh" "${TARGET_BIN_DIR}/ai-dictate-code"
+create_symlink "${SCRIPT_DIR}/scripts/dictate_v2.sh" "${TARGET_BIN_DIR}/ai-dictate-v2"
 create_symlink "${SCRIPT_DIR}/scripts/dictate.sh" "${TARGET_BIN_DIR}/dictate"
 create_symlink "${SCRIPT_DIR}/scripts/audio/record_until_silence.py" "${TARGET_BIN_DIR}/ai-record"
+create_symlink "${SCRIPT_DIR}/scripts/pipeline/encoder.py" "${TARGET_BIN_DIR}/ai-encoder"
+create_symlink "${SCRIPT_DIR}/scripts/pipeline/decoder.py" "${TARGET_BIN_DIR}/ai-decoder"
+create_symlink "${SCRIPT_DIR}/scripts/pipeline/validator.py" "${TARGET_BIN_DIR}/ai-validator"
 
 # ==============================================================================
 # Phase 2: Start Setup Scripts

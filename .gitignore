@@ -20,6 +20,11 @@ Thumbs.db
 .idea/
 .vscode/
 
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
 # Generated Convenience Symlinks (created by setup.sh & install.sh)
 /dictate.sh
 /transcribe.sh
