@@ -366,21 +366,33 @@ run_natural_pipeline() {
         RAW_TRANSCRIPT="$RAW_TEXT_OVERRIDE"
         log_info "Using raw text input: \"${RAW_TRANSCRIPT}\""
     else
-        # Recording check
-        if [[ "$FLAG_RECORD" == "true" || ( "$CUSTOM_AUDIO_SPECIFIED" == "false" && ! -f "$AUDIO_FILE" ) ]]; then
-            log_info "Recording audio from microphone until silence..."
+        # Record microphone audio if no custom file specified (or --record forced)
+        if [[ "$CUSTOM_AUDIO_SPECIFIED" == "false" || "$FLAG_RECORD" == "true" ]]; then
             local RECORDER_SCRIPT="${SCRIPT_DIR}/audio/record_until_silence.py"
-            if [[ -x "$RECORDER_SCRIPT" ]]; then
-                python3 "$RECORDER_SCRIPT" --output "$AUDIO_FILE" >&2
+            if [[ -f "$RECORDER_SCRIPT" ]] && command -v python3 &>/dev/null; then
+                rm -f "$AUDIO_FILE"
+                if ! python3 "$RECORDER_SCRIPT" \
+                    --output "$AUDIO_FILE" \
+                    --silence-duration "${AUDIO_SILENCE_DURATION:-5.0}" \
+                    --threshold "${AUDIO_SILENCE_THRESHOLD:-2.0%}" \
+                    --sample-rate "${AUDIO_SAMPLE_RATE:-16000}" \
+                    --wait-timeout "${AUDIO_LISTEN_TIMEOUT:-${LISTEN_TIMEOUT:-30.0}}" \
+                    --max-duration "${AUDIO_MAX_DURATION:-120.0}" \
+                    --backend "${AUDIO_RECORDER:-auto}" \
+                    --device "${AUDIO_DEVICE:-default}" \
+                    --prefix "[dictate-natural] " >&2; then
+                    log_no_speech
+                    return 0
+                fi
             else
-                log_err "Recorder script not found or executable at ${RECORDER_SCRIPT}"
-                exit 1
+                log_err "Recorder script not found at ${RECORDER_SCRIPT}"
+                return 1
             fi
         fi
 
-        if [[ ! -f "$AUDIO_FILE" ]]; then
-            log_err "Audio input file not found: ${AUDIO_FILE}"
-            exit 1
+        if [[ ! -f "$AUDIO_FILE" || ! -s "$AUDIO_FILE" ]]; then
+            log_no_speech
+            return 0
         fi
 
         if [[ ! -x "$WHISPER_BIN" ]]; then

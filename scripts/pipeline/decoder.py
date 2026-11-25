@@ -61,8 +61,11 @@ def load_env_variables() -> Dict[str, str]:
                     key, val = line.split("=", 1)
                     key = key.strip()
                     val = val.strip()
-                    if val and val[0] in ("'", '"') and val.endswith(val[0]):
-                        val = val[1:-1]
+                    if val and val[0] in ("'", '"'):
+                        q = val[0]
+                        end_idx = val.find(q, 1)
+                        if end_idx != -1:
+                            val = val[1:end_idx]
                     elif "#" in val:
                         val = val.split("#", 1)[0].strip()
                     env_vars[key] = val
@@ -559,15 +562,24 @@ def _build_cli_agent_command(
         return cmd, stdin_text
 
     if provider_name in ("agy", "antigravity"):
-        cmd = ["agy", "--output-format", "text"]
+        cmd = [
+            "agy",
+            "--input-format", "stream-json",
+            "--output-format", "stream-json",
+            "--disable-slash-commands",
+        ]
         if conv_id:
             cmd.extend(["--conversation", conv_id])
         elif cont:
             cmd.append("--continue")
         if target_model:
             cmd.extend(["--model", target_model])
-        cmd.extend(["-p", combined_prompt])
-        return cmd, None
+        cmd.extend(["-p", ""])
+        ndjson_payload = json.dumps({
+            "event": "user",
+            "message": {"role": "user", "content": combined_prompt},
+        }) + "\n"
+        return cmd, ndjson_payload
 
     if provider_name in ("claude-cli", "claude"):
         cmd = ["claude", "--output-format", "text"]
@@ -619,7 +631,7 @@ def call_cli_agent(
     system_prompt: str = SYSTEM_PROMPT,
 ) -> Optional[str]:
     """Invoke a local CLI agent (agy, claude-cli, codex-cli, gemini-cli, aider, opencode, custom-cli)."""
-    combined_prompt = f"{system_prompt}\n\n{user_prompt}" if system_prompt else user_prompt
+    combined_prompt = f"USER INPUT:\n{user_prompt}\n\n{system_prompt}" if system_prompt else user_prompt
     cmd, stdin_text = _build_cli_agent_command(provider_name, combined_prompt, target_model)
     if not cmd:
         return None
@@ -639,6 +651,16 @@ def call_cli_agent(
         )
         if res.returncode == 0:
             raw_output = res.stdout.strip()
+            if provider_name in ("agy", "antigravity") and raw_output:
+                parsed_resp = ""
+                for line in raw_output.splitlines():
+                    try:
+                        evt = json.loads(line)
+                        if evt.get("event") == "result":
+                            parsed_resp = ((evt.get("result") or {}).get("response") or "").strip()
+                    except Exception:
+                        continue
+                raw_output = parsed_resp
             if raw_output:
                 return strip_markdown_fences(raw_output)
             print(f"[decoder] WARN: CLI agent '{binary}' returned empty output. Utilizing deterministic fallback.", file=sys.stderr)
