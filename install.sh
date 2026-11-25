@@ -215,6 +215,8 @@ chmod +x "${SCRIPT_DIR}/scripts/pipeline/transcribe_and_optimize.sh" || true
 chmod +x "${SCRIPT_DIR}/scripts/dictate.sh" || true
 chmod +x "${SCRIPT_DIR}/scripts/dictate_v2.sh" || true
 chmod +x "${SCRIPT_DIR}/scripts/dictate-natural.sh" || true
+chmod +x "${SCRIPT_DIR}/scripts/dictate-agent.sh" || true
+chmod +x "${SCRIPT_DIR}/scripts/dictate-router.sh" || true
 chmod +x "${SCRIPT_DIR}/scripts/audio/record_until_silence.py" || true
 chmod +x "${SCRIPT_DIR}/scripts/pipeline/encoder.py" || true
 chmod +x "${SCRIPT_DIR}/scripts/pipeline/decoder.py" || true
@@ -223,6 +225,8 @@ create_symlink "${SCRIPT_DIR}/scripts/pipeline/transcribe_and_optimize.sh" "${TA
 create_symlink "${SCRIPT_DIR}/scripts/dictate.sh" "${TARGET_BIN_DIR}/ai-dictate-code"
 create_symlink "${SCRIPT_DIR}/scripts/dictate_v2.sh" "${TARGET_BIN_DIR}/ai-dictate-v2"
 create_symlink "${SCRIPT_DIR}/scripts/dictate-natural.sh" "${TARGET_BIN_DIR}/ai-dictate-natural"
+create_symlink "${SCRIPT_DIR}/scripts/dictate-agent.sh" "${TARGET_BIN_DIR}/ai-dictate-agent"
+create_symlink "${SCRIPT_DIR}/scripts/dictate-router.sh" "${TARGET_BIN_DIR}/ai-dictate-router"
 create_symlink "${SCRIPT_DIR}/scripts/audio/record_until_silence.py" "${TARGET_BIN_DIR}/ai-record"
 
 # Verify ~/.local/bin is in PATH

@@ -218,8 +218,13 @@ dispatch_agent() {
 
     local -a cmd_parts
     read -r -a cmd_parts <<< "$cmd_str"
+    local last_arg="${cmd_parts[$((${#cmd_parts[@]} - 1))]}"
     log_info "Dispatching output to CLI agent: ${cmd_str}"
-    if printf "%s" "$text" | "${cmd_parts[@]}"; then
+    if [[ "$last_arg" == "-p" || "$last_arg" == "--print" || "$last_arg" == "--prompt" || "$last_arg" == "--message" || "$last_arg" == "-m" ]]; then
+        if "${cmd_parts[@]}" "$text"; then
+            return 0
+        fi
+    elif printf "%s" "$text" | "${cmd_parts[@]}"; then
         return 0
     fi
     log_warn "CLI agent dispatch failed for command: ${cmd_str}"

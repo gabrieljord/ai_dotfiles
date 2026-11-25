@@ -210,6 +210,7 @@ def deterministic_fallback_codegen(ir: Dict[str, Any], ext: str) -> str:
         name = ir.get("name", "function_name")
         params = ir.get("params", [])
         returns = ir.get("returns", "void")
+        docstring = ir.get("docstring", "")
         body = ir.get("body", [])
 
         if clean_ext in ("py", "python"):
@@ -217,6 +218,8 @@ def deterministic_fallback_codegen(ir: Dict[str, Any], ext: str) -> str:
             p_strs = [f"{p.get('name')}: {py_type_map.get(p.get('type', 'any'), 'Any')}" for p in params]
             ret_ann = f" -> {py_type_map.get(returns, 'None')}" if returns != "void" else ""
             lines = [f"def {name}({', '.join(p_strs)}){ret_ann}:"]
+            if docstring:
+                lines.append(f'    """{docstring}"""')
             if body:
                 for b in body:
                     if b.get("intent") == "guard_clause":

@@ -54,7 +54,14 @@ def load_env_variables() -> Dict[str, str]:
                 if "=" in line:
                     key, val = line.split("=", 1)
                     key = key.strip()
-                    val = val.strip().strip("'\"")
+                    val = val.strip()
+                    if val and val[0] in ("'", '"'):
+                        q = val[0]
+                        end_idx = val.find(q, 1)
+                        if end_idx != -1:
+                            val = val[1:end_idx]
+                    elif "#" in val:
+                        val = val.split("#", 1)[0].strip()
                     env_vars[key] = val
                     if key not in os.environ:
                         os.environ[key] = val
@@ -122,6 +129,8 @@ def load_scifi_mappings() -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str
         "yield": "return_statement",
         "return": "return_statement",
         "guard": "guard_clause",
+        "scribe": "docstring",
+        "docstring": "docstring",
         "test": "if_statement",
         "if": "if_statement",
         "shift": "else_statement",
@@ -391,7 +400,7 @@ class StateMachineParser:
         # Parse function name
         name_words: List[str] = []
         param_boundary_tokens = ("with", "parameters", "params", "takes", "__THIN_ARROW__", "to", "returns", "yields")
-        body_boundary_triggers = ("guard", "yield", "return", "test", "if", "flux", "bind", "lock", "hull")
+        body_boundary_triggers = ("guard", "yield", "return", "test", "if", "flux", "bind", "lock", "hull", "scribe", "docstring")
 
         while self.peek():
             curr = self.peek()
@@ -422,6 +431,17 @@ class StateMachineParser:
             else:
                 returns = "void"
 
+        # Parse optional docstring escape hatch ('scribe <natural language instruction>')
+        docstring: Optional[str] = None
+        if self.match(("scribe", "docstring")):
+            self.consume()  # consume 'scribe' / 'docstring'
+            doc_stop_triggers = ("guard", "yield", "return")
+            doc_words: List[str] = []
+            while self.peek() and self.peek() not in doc_stop_triggers:
+                doc_words.append(self.consume())
+            if doc_words:
+                docstring = " ".join(doc_words)
+
         # Parse body statements if remaining tokens exist
         body: List[Dict[str, Any]] = []
         while self.peek():
@@ -439,6 +459,8 @@ class StateMachineParser:
             node["params"] = params
         if returns is not None:
             node["returns"] = returns
+        if docstring is not None:
+            node["docstring"] = docstring
         node["body"] = body
 
         return node
@@ -446,7 +468,7 @@ class StateMachineParser:
     def parse_param_list(self) -> List[Dict[str, str]]:
         """Parses parameter sequences: <name> <type> [and / comma] ..."""
         params: List[Dict[str, str]] = []
-        end_tokens = ("__THIN_ARROW__", "to", "returns", "yields", "guard", "yield", "return", "test")
+        end_tokens = ("__THIN_ARROW__", "to", "returns", "yields", "guard", "yield", "return", "test", "scribe", "docstring")
 
         while self.peek() and self.peek() not in end_tokens:
             if self.match(("and", "comma", ",")):
