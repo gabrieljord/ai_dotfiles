@@ -180,6 +180,52 @@ trigger_autopaste() {
     fi
 }
 
+dispatch_tmux() {
+    local text="$1"
+    local target="${TMUX_TARGET_PANE:-}"
+    if ! command -v tmux &>/dev/null; then
+        log_warn "tmux not found; cannot dispatch to tmux pane."
+        return 1
+    fi
+    if [[ -z "$target" ]]; then
+        log_warn "TMUX_TARGET_PANE is not set; skipping tmux dispatch."
+        return 1
+    fi
+    if printf "%s" "$text" | tmux load-buffer - && tmux paste-buffer -t "$target"; then
+        if [[ "${TMUX_SEND_ENTER:-false}" == "true" ]]; then
+            tmux send-keys -t "$target" Enter
+        fi
+        log_info "Dispatched output to tmux pane: ${target}"
+        return 0
+    fi
+    log_warn "Failed to dispatch output to tmux pane: ${target}"
+    return 1
+}
+
+dispatch_agent() {
+    local text="$1"
+    local cmd_str="${AGENT_DISPATCH_CMD:-}"
+    if [[ -z "$cmd_str" ]]; then
+        if command -v agy &>/dev/null; then
+            cmd_str="agy -c -p"
+        elif command -v claude &>/dev/null; then
+            cmd_str="claude -c -p"
+        else
+            log_warn "AGENT_DISPATCH_CMD is not set and no supported CLI agent (agy, claude) was found."
+            return 1
+        fi
+    fi
+
+    local -a cmd_parts
+    read -r -a cmd_parts <<< "$cmd_str"
+    log_info "Dispatching output to CLI agent: ${cmd_str}"
+    if printf "%s" "$text" | "${cmd_parts[@]}"; then
+        return 0
+    fi
+    log_warn "CLI agent dispatch failed for command: ${cmd_str}"
+    return 1
+}
+
 check_wake_word() {
     local text="$1"
     local wake_word="$2"
@@ -227,6 +273,9 @@ Options:
   --wake-word WORD    Require spoken wake word (e.g. 'computer', 'jarvis'; overrides .env)
   --no-wake-word      Disable wake word check (even if enabled in .env)
   -r, --raw-text STR  Bypass Whisper and pipe raw text directly to AST Encoder
+  --provider NAME     Override LLM provider/CLI agent (gemini, openai, anthropic, ollama, agy, claude-cli, codex-cli, gemini-cli, custom-cli)
+  --model NAME        Override LLM model name
+  --dispatch METHOD   Override output dispatch (stdout, clipboard, tmux, agent)
   -h, --help          Show this help message
 EOF
     exit "$exit_code"
@@ -273,6 +322,19 @@ while [[ $# -gt 0 ]]; do
             ;;
         -r|--raw-text)
             RAW_TEXT_OVERRIDE="$2"
+            shift 2
+            ;;
+        --provider)
+            export LLM_PROVIDER="$2"
+            shift 2
+            ;;
+        --model)
+            export LLM_MODEL_NAME="$2"
+            export AGENT_CLI_MODEL="$2"
+            shift 2
+            ;;
+        --dispatch)
+            export DISPATCH_METHOD="$2"
             shift 2
             ;;
         -h|--help)
@@ -467,8 +529,13 @@ run_dictate_pipeline() {
     # --------------------------------------------------------------------------
     printf "%s\n" "$FINAL_CODE"
 
-    # System Integration: Clipboard and Auto-Paste
-    if [[ "$CONTINUOUS_MODE" == "true" || "${DISPATCH_METHOD:-stdout}" == "clipboard" ]]; then
+    # System Integration: Clipboard/Auto-Paste, tmux pane, or CLI Agent dispatch
+    local active_dispatch="${DISPATCH_METHOD:-stdout}"
+    if [[ "$active_dispatch" == "tmux" ]]; then
+        dispatch_tmux "$FINAL_CODE" || true
+    elif [[ "$active_dispatch" == "agent" ]]; then
+        dispatch_agent "$FINAL_CODE" || true
+    elif [[ "$CONTINUOUS_MODE" == "true" || "$active_dispatch" == "clipboard" ]]; then
         dispatch_clipboard "$FINAL_CODE" || true
         trigger_autopaste
     fi

@@ -257,6 +257,9 @@ Options:
   --wake-word WORD    Require spoken wake word (e.g. 'computer', 'jarvis')
   --no-wake-word      Disable wake word check (even if enabled in .env)
   -r, --raw-text STR  Bypass Whisper and pipe raw speech text directly to translator
+  --provider NAME     Override LLM provider or CLI agent (e.g. gemini, agy, claude-cli, openai, ollama)
+  --model NAME        Override LLM model name
+  --dispatch METHOD   Override output dispatch (stdout, clipboard, tmux, agent)
   -h, --help          Show this help message
 EOF
     exit "$exit_code"
@@ -304,6 +307,20 @@ while [[ $# -gt 0 ]]; do
             ;;
         -r|--raw-text)
             RAW_TEXT_OVERRIDE="$2"
+            shift 2
+            ;;
+        --provider)
+            export LLM_PROVIDER="$2"
+            shift 2
+            ;;
+        --model)
+            export LLM_MODEL_NAME="$2"
+            export AGENT_CLI_MODEL="$2"
+            MODEL_NAME="$2"
+            shift 2
+            ;;
+        --dispatch)
+            export DISPATCH_METHOD="$2"
             shift 2
             ;;
         -h|--help)
@@ -430,56 +447,34 @@ run_natural_pipeline() {
     fi
 
     # --------------------------------------------------------------------------
-    # Stage 1: Lexicon Translation via Ollama
+    # Stage 1: Lexicon Translation via configured LLM provider / CLI agent
     # --------------------------------------------------------------------------
-    log_info "Translating natural speech to sci-fi triggers via Ollama (${MODEL_NAME} at ${OLLAMA_ENDPOINT})..."
+    local ACTIVE_PROVIDER="${LLM_PROVIDER:-ollama}"
+    log_info "Translating natural speech to sci-fi triggers via ${ACTIVE_PROVIDER} (${MODEL_NAME})..."
 
-    # Construct JSON payload using jq, injecting scifi_lexicon.json into {{LEXICON_JSON}}
-    local PAYLOAD
-    PAYLOAD="$(jq -n \
+    local RENDERED_SYS_PROMPT="${TMP_DIR}/natural_sys_prompt_$$.txt"
+    if ! jq -rn \
         --rawfile tmpl "$SYSTEM_PROMPT_FILE" \
         --rawfile lex "$LEXICON_FILE" \
-        --arg prompt "$RAW_TRANSCRIPT" \
-        --arg model "$MODEL_NAME" \
-        '{
-            model: $model,
-            system: ($tmpl | sub("\\{\\{LEXICON_JSON\\}\\}"; $lex)),
-            prompt: $prompt,
-            stream: false,
-            options: {
-                temperature: 0.1,
-                num_predict: 256
-            }
-        }' 2>/dev/null || true)"
-
-    if [[ -z "$PAYLOAD" ]]; then
-        log_err "Failed to assemble Ollama JSON payload using jq."
+        '$tmpl | sub("\\{\\{LEXICON_JSON\\}\\}"; $lex)' > "$RENDERED_SYS_PROMPT" 2>/dev/null; then
+        log_err "Failed to assemble lexicon system prompt using jq."
+        rm -f "$RENDERED_SYS_PROMPT"
         exit 1
     fi
 
-    local HTTP_RESPONSE
-    local CURL_EXIT=0
-    HTTP_RESPONSE="$(
-        printf "%s" "$PAYLOAD" | curl -sS \
-            --max-time "$TIMEOUT_SEC" \
-            -H "Content-Type: application/json" \
-            -d @- \
-            "${OLLAMA_ENDPOINT}/api/generate" 2>&1
-    )" || CURL_EXIT=$?
+    local DECODER_SCRIPT="${SCRIPT_DIR}/pipeline/decoder.py"
+    local TRANSLATED_RAW=""
+    local DECODER_EXIT=0
+    TRANSLATED_RAW="$(
+        printf "%s" "$RAW_TRANSCRIPT" | python3 "$DECODER_SCRIPT" \
+            --raw-prompt \
+            --system-prompt-file "$RENDERED_SYS_PROMPT"
+    )" || DECODER_EXIT=$?
+    rm -f "$RENDERED_SYS_PROMPT"
 
-    if [[ $CURL_EXIT -ne 0 ]]; then
-        log_err "Ollama translation API call failed (curl exit code ${CURL_EXIT}): ${HTTP_RESPONSE}"
-        exit 1
-    fi
-
-    local TRANSLATED_RAW
-    TRANSLATED_RAW="$(printf "%s" "$HTTP_RESPONSE" | jq -re '.response // empty' 2>/dev/null || true)"
-
-    if [[ -z "$TRANSLATED_RAW" ]]; then
-        local ERR_MSG
-        ERR_MSG="$(printf "%s" "$HTTP_RESPONSE" | jq -r '.error // empty' 2>/dev/null || echo "$HTTP_RESPONSE")"
-        log_err "Ollama translation returned empty response or error: ${ERR_MSG}"
-        exit 1
+    if [[ $DECODER_EXIT -ne 0 || -z "$TRANSLATED_RAW" ]]; then
+        log_err "Lexicon translation failed via provider '${ACTIVE_PROVIDER}'."
+        return 1
     fi
 
     # Clean translated output: strip markdown code blocks, trim quotes and excess whitespace
@@ -489,7 +484,7 @@ run_natural_pipeline() {
 
     if [[ -z "$TRANSLATED_SYLLABLES" ]]; then
         log_err "Translated sci-fi triggers string is empty after cleaning."
-        exit 1
+        return 1
     fi
 
     log_info "Translated sci-fi triggers: \"${TRANSLATED_SYLLABLES}\""
