@@ -2,6 +2,9 @@
 
 > Dotfiles and environment configurations for a local and remote Whisper speech-to-text and LLM prompt optimization pipeline.
 
+A special thanks to https://github.com/tavisrudd for their pycon talk in  2013 (during which I was in middle school) showcasing dictation for programming and the state of the art then. This project would not exist if it was not because of you <3.
+
+
 `ai_dotfiles` provides a modular, reproducible infrastructure for streaming low-latency voice dictation into local or home-server LLM inference pipelines (Ollama / LM Studio), resolving domain homophones with dynamic context switching, and directly injecting optimized code and structured prompts into **Cursor** and **VS Code**.
 
 ---
@@ -10,28 +13,30 @@
 
 ```mermaid
 flowchart TD
-    subgraph IDE["Developer Workspace (Cursor / VS Code)"]
-        ACTIVE["Active Buffer (e.g. main.py, lib.rs)"] --> EXT["Extract File Extension\n(\${fileExtname}: py, rs, ts)"]
-        EXT --> DICTATE["scripts/dictate.sh"]
-        STDOUT["Clean Code (stdout)"] -.->|Direct Buffer Insert| ACTIVE
+    subgraph AudioSTT["Audio Capture & Speech-to-Text"]
+        MIC["Microphone / WAV File"] --> VAD["record_until_silence.py\n(Dynamic Silence VAD)"]
+        VAD --> WCPP["whisper-cli (-ng)\n(ggml-tiny.en.bin)"]
+        WCPP --> RAW["Raw Spoken Text\n('spark fetch user thin arrow drift')"]
     end
 
-    subgraph WhisperEngine["Whisper.cpp (STT / CPU-Only)"]
-        WAV["Input Audio WAV\n(/tmp/ai_dotfiles/input_recording.wav)"] --> WCPP["whisper-cli (-ngl 0)"]
-        PROMPTS["config/prompts/lang_prompts.env\n(Domain Vocabulary Primer)"] -->|--prompt| WCPP
-        WCPP --> RAW["Raw Spoken Text\n(Homophones Resolved)"]
+    subgraph Autoencoder["Deterministic Voice Autoencoder (scripts/pipeline/encoder.py)"]
+        RAW --> LEX["whisper/grammars/scifi_lexicon.json\n(Deterministic Rules & Triggers)"]
+        LEX --> SM["State-Machine AST Parser"]
+        SM --> AST["Strict JSON AST (Intermediate Representation)\n{'intent': 'function_declaration', 'name': 'fetch_user', 'returns': 'float', 'body': []}"]
     end
 
-    subgraph LLMEngine["Local LLM Compiler (Ollama / LM Studio)"]
-        RAW --> CURL["curl & jq API Pipeline"]
-        GRAMMARS["whisper/grammars/*.md\n(code_talker & boilerplate rules)"] -->|System Prompt| CURL
-        CURL --> LLM["Llama 3 / Mistral / Custom Model"]
-        LLM --> STDOUT
+    subgraph LLMDecoder["LLM Syntax Decoder (scripts/pipeline/decoder.py)"]
+        AST --> OLLAMA["Ollama API (/api/generate)\nSystem: 'You are a syntax compiler...'"]
+        OLLAMA --> CODE["Raw Target Code\n(Python, Rust, TypeScript, etc.)"]
     end
 
-    DICTATE --> WAV
-    DICTATE --> PROMPTS
-    DICTATE --> CURL
+    subgraph ValidatorLoop["Subprocess Linter & Retry Loop (scripts/pipeline/validator.py)"]
+        CODE --> LINTER{"Local Linter Subprocess\n(.py: py_compile / ruff\n.rs: rustfmt\n.ts/.js: biome)"}
+        LINTER -->|Exit 0: Valid| STDOUT["stdout / Active Editor Buffer"]
+        LINTER -->|Exit != 0: Syntax Error| RETRY{"Retry < 2?"}
+        RETRY -->|Yes: Feed stderr back to Decoder| OLLAMA
+        RETRY -->|No: Hardcap reached| COMMENT["Commented Linter Error + Last Code"] --> STDOUT
+    end
 ```
 
 ---
@@ -43,16 +48,20 @@ ai_dotfiles/
 ├── .env.example               # Full template for local/remote pipeline configurations
 ├── .gitignore                 # Ignores local secrets, audio buffers, and model weights
 ├── install.sh                 # Safe, idempotent bootstrap installer & link manager
+├── setup.sh                   # Master orchestration setup script
 ├── README.md                  # System documentation & setup guide
 ├── whisper -> config/whisper  # Root symlink for grammar & config discovery
+├── prompts -> config/prompts  # Root symlink for language prompts discovery
 ├── config/
 │   ├── whisper/
 │   │   ├── whisper.conf       # Audio parameters, thread counts, and model profiles
 │   │   └── grammars/          # Spoken grammar specifications in Markdown
 │   │       ├── code_talker.md # Casing styles, operators, punctuation, control flow
+│   │       ├── scifi_lexicon.md # 1,392 monosyllabic sci-fi keyword triggers
+│   │       ├── scifi_lexicon.json # Machine-readable keyword lookup table
 │   │       └── boilerplate.md # Macros: dates (american date today), templates, git
 │   ├── prompts/
-│   │   └── lang_prompts.env   # Extension-to-Whisper initial_prompt vocabulary mappings
+│   │   └── lang_prompts.env   # 595 languages & 1,840+ extension/alias Whisper prompts
 │   ├── ollama/
 │   │   ├── Modelfile.prompt-optimizer  # Custom Modelfile for prompt structuring
 │   │   └── system-prompts/
@@ -61,11 +70,20 @@ ai_dotfiles/
 │       ├── tasks.json         # VS Code / Cursor task passing ${fileExtname}
 │       └── keybindings.json   # IDE hotkey mapping (Ctrl+Alt+D)
 ├── scripts/
-│   ├── dictate.sh             # Core dynamic context & LLM piping pipeline (stdout)
+│   ├── dictate.sh             # Classic dynamic context & LLM piping pipeline (stdout)
+│   ├── dictate_v2.sh          # Autoencoder/Decoder & validated AST pipeline (stdout)
+│   ├── audio/
+│   │   └── record_until_silence.py # Dynamic voice activity & silence detection recorder
 │   ├── pipeline/
-│   │   └── transcribe_and_optimize.sh # General dictation & clipboard/auto-paste runner
+│   │   ├── encoder.py         # Phase 1: Deterministic State-Machine AST Parser (JSON IR)
+│   │   ├── decoder.py         # Phase 2: LLM Syntax Compiler (Ollama API)
+│   │   ├── validator.py       # Phase 3: Subprocess Linter & Retry Loop
+│   │   └── transcribe_and_optimize.sh # General voice dictation daemon runner
 │   └── setup/
-│       └── setup_whisper_cpp.sh       # Automated build & model downloader
+│       ├── setup_whisper_cpp.sh       # Automated build & model downloader
+│       ├── generate_lang_prompts.py   # Regenerates lang_prompts.env from Linguist
+│       ├── generate_scifi_grammar.py  # Regenerates scifi_lexicon.json and scifi_lexicon.md
+│       └── languages.yml              # Canonical GitHub Linguist language specs
 └── systemd/
     └── whisper-server.service.example # Systemd unit file for headless home servers
 ```
@@ -75,17 +93,119 @@ ai_dotfiles/
 ## Dynamic Context & Spoken Grammars
 
 ### 1. Language-Specific Vocabulary Biasing (`config/prompts/lang_prompts.env`)
-Whisper's initial prompt (`-p` / `--prompt`) biases acoustic token probabilities towards programming jargon and symbols. When editing a file in Cursor or VS Code, the extension is detected and the appropriate domain vocabulary is automatically injected:
+Whisper's initial prompt (`-p` / `--prompt`) biases acoustic token probabilities towards programming jargon and symbols. When editing a file in Cursor or VS Code, the extension is detected and the appropriate domain vocabulary is automatically injected.
 
-- **Python (`py`)**: `PROMPT_PY="Python, async, await, def, dict, list, tuple, snake_case, kwargs..."`
-- **Rust (`rs`)**: `PROMPT_RS="Rust, fn, mut, impl, struct, enum, Result, Option, match, Vec..."`
-- **TypeScript (`ts`/`tsx`)**: `PROMPT_TS="TypeScript, interface, type, const, async, await, Promise..."`
-- **Go (`go`)**: `PROMPT_GO="Go, golang, func, package, struct, interface, chan, defer..."`
+`config/prompts/lang_prompts.env` provides comprehensive coverage for **all 573 programming languages known to GitHub Linguist** (plus key markup and query languages—595 languages and 1,840+ extension/alias mappings in total). Sourced in under 20ms.
+
+- **Python (`py`, `python`)**: `PROMPT_PY="Python, async, await, def, dict, list, tuple, snake_case, kwargs..."`
+- **Rust (`rs`, `rust`)**: `PROMPT_RS="Rust, fn, mut, impl, struct, enum, Result, Option, match, Vec..."`
+- **TypeScript (`ts`, `tsx`)**: `PROMPT_TS="TypeScript, interface, type, const, async, await, Promise..."`
+- **C / C++ (`c`, `cpp`, `c++`)**: `PROMPT_CPP="C++, cpp, std, vector, auto, template, typename, class..."`
+- **C# (`cs`, `c#`)**: `PROMPT_CS="C#, csharp, class, struct, interface, enum, record, namespace, using..."`
+- **Zig (`zig`, `zon`)**: `PROMPT_ZIG="Zig, fn, pub, const, var, struct, enum, union, error, try, catch..."`
+- **Gleam (`gleam`)**: `PROMPT_GLEAM="Gleam, pub, fn, let, assert, type, opaque, case, of, import..."`
+- **Solidity (`sol`, `solidity`)**: `PROMPT_SOL="Solidity, pragma, contract, interface, function, public, private..."`
+- **Full Spectrum**: Covers Ada, COBOL, Fortran, Haskell, OCaml, Clojure, Elixir, Julia, R, Lua, PowerShell, SQL, and 500+ more.
 - **Fallback**: Unrecognized extensions fall back to `PROMPT_DEFAULT` gracefully.
 
 ### 2. Spoken Grammars (`whisper/grammars/*.md`)
-Grammars dictate how spoken words translate to syntax and boilerplate:
-- **Punctuation & Operators**:
+Grammars dictate how spoken words translate to syntax, boilerplate, and keywords:
+
+---
+
+## Wake Word Activation & Voice Control
+
+`ai_dotfiles` supports customizable, case-insensitive **Wake Word Detection** with automated prefix stripping.
+
+### Configuration (`.env`)
+```bash
+# Enable wake word verification
+WAKE_WORD_ENABLED=true
+
+# Set your custom wake word or phrase
+WAKE_WORD="computer"
+
+# Automatically strip wake word and following punctuation before passing to LLM
+WAKE_WORD_STRIP=true
+```
+
+### Supported Variations & Features
+- **Conversational Fillers**: Naturally tolerates filler prefixes like `"Hey"`, `"Um"`, `"Ok"`, or `"Uh"` (e.g. `"Hey computer, create a table"`).
+- **Multiple Alternatives**: Alternate wake words can be separated by a pipe `|`:
+  ```bash
+  WAKE_WORD="computer|jarvis"
+  ```
+- **CLI Overrides**:
+  ```bash
+  # Override or enable wake word on the fly:
+  ai-dictate --wake-word "jarvis"
+
+  # Temporarily disable wake word requirement:
+  ai-dictate --no-wake-word
+
+  # Run as a continuous hands-free voice daemon:
+  ai-dictate --continuous --wake-word "computer"
+
+  # Run continuous code dictation daemon for a specific language:
+  dictate.sh -c py
+  ai-dictate-code -c rs
+  ```
+
+### Desktop Notifications (`-c` Mode Only)
+When working on another monitor or full-screen application away from the terminal, continuous mode (`-c` / `--continuous`) emits non-intrusive notification banners via `notify-send` strictly for meaningful events:
+- **✔ Wake Word Heard**: Instant notification when your spoken wake word is recognized and code/prompt capture begins.
+- **✔ Code Ready (.ext) / Prompt Ready**: Notification displaying the first lines of generated code or optimized prompt when processing completes and output is copied to the clipboard.
+- **Silent Elsewhere**: Startup, shutdown, ambient silence, and speech without a wake word remain silent to eliminate desktop spam. Single-shot executions (`ai-dictate-code py` or IDE shortcuts) also remain completely silent on screen.
+
+Configure in `.env`:
+```bash
+NOTIFY_ON_CONTINUOUS=true   # Enable desktop notifications in -c mode
+NOTIFY_TIMEOUT_MS=3000      # Toast duration (milliseconds)
+```
+
+---
+
+## Audio Capture & Silence Detection
+
+`ai-dictate` includes an intelligent **Voice Activity & Silence Detection (VAD)** audio recorder (`scripts/audio/record_until_silence.py` / `ai-record`):
+- **Runs Until You Stop Speaking**: Dynamically calibrates ambient room noise floor, detects speech onset, buffers the pre-speech audio (preventing first syllable clipping), and automatically ends recording once a configured period of silence is detected (default `1.2s`).
+- **Zero ALSA Spam**: Suppresses low-level ALSA driver warnings for clean terminal logging.
+- **Backends**: Direct PyAudio stream with automatic fallback to `arecord`, `parecord`, `ffmpeg`, or `sox`.
+
+Configure parameters in `.env`:
+```bash
+AUDIO_SILENCE_DURATION=5.0     # Silence duration in seconds before finalizing capture
+AUDIO_SILENCE_THRESHOLD="2.0%" # Energy threshold (percentage or integer RMS)
+AUDIO_LISTEN_TIMEOUT=30        # Max wait time in seconds for initial speech while listening
+AUDIO_MAX_DURATION=120         # Maximum safety recording duration (seconds)
+```
+- **Sci-Fi Single-Syllable Codex (`whisper/grammars/scifi_lexicon.md`)**:
+  - Maps **all 1,392 distinct words** from `config/prompts/lang_prompts.env` to strictly single-syllable sci-fi/cybernetic codewords to eliminate recognition slur and speech fatigue during dictation.
+  - `test` $\rightarrow$ `if`
+  - `shift` $\rightarrow$ `else`
+  - `spin` $\rightarrow$ `for`
+  - `hold` $\rightarrow$ `while` / `await`
+  - `yield` $\rightarrow$ `return`
+  - `core` $\rightarrow$ `function` / `def`
+  - `spark` $\rightarrow$ `fn` / `lambda`
+  - `flux` $\rightarrow$ `var` / mutable
+  - `lock` $\rightarrow$ `const` / immutable
+  - `bind` $\rightarrow$ `let`
+  - `sync` $\rightarrow$ `async`
+  - `dock` $\rightarrow$ `import` / `use`
+  - `ship` $\rightarrow$ `export`
+  - `strand` $\rightarrow$ `string` / `str`
+  - `count` $\rightarrow$ `int` / integer
+  - `drift` $\rightarrow$ `float` / double
+  - `bit` $\rightarrow$ `bool` / boolean
+  - `pulse` $\rightarrow$ `true`
+  - `dead` $\rightarrow$ `false`
+  - `void` $\rightarrow$ `void` / `null` / `None`
+  - `hull` $\rightarrow$ `struct`
+  - `clan` $\rightarrow$ `class`
+  - `port` $\rightarrow$ `interface`
+  - Regenerable via `scripts/setup/generate_scifi_grammar.py`; machine-readable lookup at `whisper/grammars/scifi_lexicon.json`.
+- **Punctuation & Operators (`code_talker.md`)**:
   - `arrow func` / `fat arrow` $\rightarrow$ `=>`
   - `thin arrow` / `returns` $\rightarrow$ `->`
   - `equals equals` $\rightarrow$ `==` (or `===` in JS/TS)
@@ -97,7 +217,7 @@ Grammars dictate how spoken words translate to syntax and boilerplate:
   - `camel case fetch customer data` $\rightarrow$ `fetchCustomerData`
   - `pascal case auth token provider` $\rightarrow$ `AuthTokenProvider`
   - `constant case max retries` $\rightarrow$ `MAX_RETRIES`
-- **Temporal & Boilerplate Macros**:
+- **Temporal & Boilerplate Macros (`boilerplate.md`)**:
   - `american date today` $\rightarrow$ current date in `MM/DD/YYYY` (e.g. `11/23/2026`)
   - `iso date today` $\rightarrow$ current date in `YYYY-MM-DD`
   - `shebang bash` $\rightarrow$ `#!/usr/bin/env bash\nset -euo pipefail`
@@ -237,6 +357,30 @@ systemctl --user enable --now whisper-server.service
 ```
 
 ---
+
+## Useage and CLI Examples
+
+Verified Examples & Usage
+  
+    # 1. Python Code Dictation via v2 Pipeline
+    dictate_v2.sh py --raw-text "spark fetch user thin arrow drift" --no-wake-word
+    # Output on stdout:
+    # def fetch_user() -> float:
+    #     pass
+  
+    # 2. Rust Code Dictation via v2 Pipeline
+    dictate_v2.sh rs --raw-text "spark fetch user thin arrow drift" --no-wake-word
+    # Output on stdout:
+    # pub fn fetch_user() -> f32 {
+    #     todo!()
+    # }
+  
+    # 3. Direct UNIX Pipeline
+    echo "spark fetch user thin arrow drift" | ai-encoder | ai-decoder --ext py | ai-validator --ext py          
+  
+    # 4. Transcribe from an Audio File
+    dictate_v2.sh py /path/to/recording.wav
+
 
 ## License
 MIT License.

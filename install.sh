@@ -90,6 +90,9 @@ check_command() {
     if command -v "$cmd" &>/dev/null; then
         printf "  %-18s ${COLOR_GREEN}✓ Found${COLOR_RESET} (${COLOR_GRAY}%s${COLOR_RESET})\n" "$cmd" "$(command -v "$cmd")"
         return 0
+    elif [[ -x "${HOME}/.local/bin/${cmd}" ]]; then
+        printf "  %-18s ${COLOR_GREEN}✓ Found${COLOR_RESET} (${COLOR_GRAY}%s${COLOR_RESET})\n" "$cmd" "${HOME}/.local/bin/${cmd}"
+        return 0
     else
         if [[ "$required" == "true" ]]; then
             printf "  %-18s ${COLOR_RED}✗ Missing (Required)${COLOR_RESET}\n" "$cmd"
@@ -198,15 +201,33 @@ create_symlink() {
 # 1. Link modular config directory
 create_symlink "${CONFIG_SOURCE_DIR}" "${TARGET_CONFIG_DIR}"
 
-# 2. Link root .env to config directory for easy discovery by daemon/scripts
+# 2. Ensure convenience symlinks at repo root
+ln -sfn config/whisper "${SCRIPT_DIR}/whisper"
+ln -sfn config/prompts "${SCRIPT_DIR}/prompts"
+ln -sfn grammars "${SCRIPT_DIR}/config/whisper/grammers"
+
+# 3. Link root .env to config directory for easy discovery by daemon/scripts
 create_symlink "${ENV_TARGET}" "${TARGET_CONFIG_DIR}/.env"
 
 # 3. Symlink pipeline runner scripts to ~/.local/bin
 mkdir -p "${TARGET_BIN_DIR}"
 chmod +x "${SCRIPT_DIR}/scripts/pipeline/transcribe_and_optimize.sh" || true
 chmod +x "${SCRIPT_DIR}/scripts/dictate.sh" || true
+chmod +x "${SCRIPT_DIR}/scripts/dictate_v2.sh" || true
+chmod +x "${SCRIPT_DIR}/scripts/dictate-natural.sh" || true
+chmod +x "${SCRIPT_DIR}/scripts/dictate-agent.sh" || true
+chmod +x "${SCRIPT_DIR}/scripts/dictate-router.sh" || true
+chmod +x "${SCRIPT_DIR}/scripts/audio/record_until_silence.py" || true
+chmod +x "${SCRIPT_DIR}/scripts/pipeline/encoder.py" || true
+chmod +x "${SCRIPT_DIR}/scripts/pipeline/decoder.py" || true
+chmod +x "${SCRIPT_DIR}/scripts/pipeline/validator.py" || true
 create_symlink "${SCRIPT_DIR}/scripts/pipeline/transcribe_and_optimize.sh" "${TARGET_BIN_DIR}/ai-dictate"
 create_symlink "${SCRIPT_DIR}/scripts/dictate.sh" "${TARGET_BIN_DIR}/ai-dictate-code"
+create_symlink "${SCRIPT_DIR}/scripts/dictate_v2.sh" "${TARGET_BIN_DIR}/ai-dictate-v2"
+create_symlink "${SCRIPT_DIR}/scripts/dictate-natural.sh" "${TARGET_BIN_DIR}/ai-dictate-natural"
+create_symlink "${SCRIPT_DIR}/scripts/dictate-agent.sh" "${TARGET_BIN_DIR}/ai-dictate-agent"
+create_symlink "${SCRIPT_DIR}/scripts/dictate-router.sh" "${TARGET_BIN_DIR}/ai-dictate-router"
+create_symlink "${SCRIPT_DIR}/scripts/audio/record_until_silence.py" "${TARGET_BIN_DIR}/ai-record"
 
 # Verify ~/.local/bin is in PATH
 if [[ ":$PATH:" != *":$TARGET_BIN_DIR:"* ]]; then

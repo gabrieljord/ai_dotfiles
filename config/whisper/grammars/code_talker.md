@@ -75,3 +75,106 @@ Dictate the casing trigger followed by the words to format:
 | `for item in items` | `for item in items:` | `for item in items {` | `for (const item of items) {` |
 | `return <val>` | `return <val>` | `return <val>;` / `<val>` | `return <val>;` |
 | `arrow function <args> returns <expr>` | `lambda <args>: <expr>` | `\|<args>\| <expr>` | `(<args>) => <expr>` |
+
+---
+
+## 5. Sci-Fi Single-Syllable Keyword Layer
+
+To eliminate recognition slur and speech fatigue during high-speed coding, the pipeline supports single-syllable sci-fi keywords that map directly to high-frequency programming constructs. See [scifi_lexicon.md](file:///home/blujay/code/ai_dotfiles/config/whisper/grammars/scifi_lexicon.md) for the complete A-Z codex covering all 1,392 words in `config/prompts/lang_prompts.env`.
+
+| Sci-Fi Trigger | Traditional Spoken Equivalent | Target Expansion | Thematic Meaning / Context |
+| :--- | :--- | :--- | :--- |
+| `test <cond>` | `if <cond>` | `if <cond>:` / `if (<cond>) {` | Diagnostic condition gate check |
+| `shift` | `else` | `else:` / `else {` | Alternate execution branch shift |
+| `step <cond>` | `else if <cond>` / `elif <cond>` | `elif <cond>:` / `else if (<cond>) {` | Sub-branch conditional step |
+| `spin <item> in <items>` | `for <item> in <items>` | `for <item> in <items>:` | Iterative loop cycle |
+| `hold <cond>` | `while <cond>` | `while <cond>:` / `while (<cond>) {` | Continuous hold stasis loop |
+| `yield <val>` | `return <val>` | `return <val>` | Emit value or beam output |
+| `snap` | `break` | `break;` / `break` | Fracture execution loop |
+| `skip` | `continue` | `continue;` / `continue` | Skip to next loop cycle |
+| `scan <val>` | `match <val>` / `switch <val>` | `match <val>:` / `switch (<val>) {` | Pattern matching scan |
+| `core <name>` | `def <name>` / `function <name>` | `def <name>(...):` / `fn <name>(...)` | Main computing reactor core |
+| `spark <name>` | `fn <name>` / `lambda <args>` | `fn <name>` / `lambda <args>:` | Lightweight function spark |
+| `flux <name>` | `var <name>` / `mut <name>` | `let mut <name>` / `var <name>` | Variable dynamic flux |
+| `lock <name>` | `const <name>` / `final <name>` | `const <name> =` | Permanent immutable lock |
+| `bind <name>` | `let <name>` | `let <name> =` | Lexical scope binding |
+| `sync <fn>` | `async <fn>` | `async def` / `async fn` | Temporal warp sync |
+| `hold <expr>` | `await <expr>` | `await <expr>` | Hold until signal lock |
+| `dock <mod>` | `import <mod>` / `use <mod>` | `import <mod>` / `use <mod>::*` | Dock external module/freighter |
+| `ship <item>` | `export <item>` | `export const` / `pub use` | Transmit outbound payload |
+| `strand` | `string` / `str` | `String` / `str` / `std::string` | Linear byte/nanowire strand |
+| `count` | `int` / `integer` | `int` / `i32` / `i64` | Discrete numerical tally |
+| `drift` | `float` / `double` | `float` / `f64` | Floating point vector drift |
+| `bit` | `bool` / `boolean` | `bool` / `boolean` | Binary 1-bit logic state |
+| `void` | `void` / `null` / `None` | `void` / `None` / `null` | Empty vacuum state |
+| `pulse` | `true` | `True` / `true` | Active high signal pulse |
+| `dead` | `false` | `False` / `false` | Zero ground state |
+| `hull <name>` | `struct <name>` | `struct <name> {` | Composite hull structure |
+| `clan <name>` | `class <name>` | `class <name>:` / `class <name> {` | Archetype classification group |
+| `port <name>` | `interface <name>` | `interface <name> {` | Standardized docking interface |
+
+---
+
+## 6. Chained Constructs & Intent-Driven Dictation
+
+To avoid micromanaging low-level AST tokens (e.g. spelling out colons, brackets, arrows, and boolean gates one by one), the pipeline supports **Chained Intent Dictation**. This collapses multi-statement functions into dense, single-breath utterances.
+
+### Compound Chaining Patterns
+
+| Spoken Chaining Pattern | Target Expansion (Language Idiomatic) | Purpose |
+| :--- | :--- | :--- |
+| `guard <var> [fail\|breach] <msg>` | `if not <var>:`<br>&nbsp;&nbsp;&nbsp;&nbsp;`raise ValueError("<msg>")` | Collapses condition check + raise into 5 words |
+| `guard <var>` (implicit fail) | `if not <var>:`<br>&nbsp;&nbsp;&nbsp;&nbsp;`raise ValueError("<var> required")` | Invariant assertion / parameter check |
+| `[fn\|def\|core] <name> with <p1> <t1> ... to <ret>` | `def <name>(<p1>: <t1>) -> <ret>:` /<br>`fn <name>(<p1>: <t1>) -> <ret> {` | Positional parameter-type pairs without `slot`/`form` |
+| `return format <text and vars>` /<br>`return <text and vars> formatted` | `return f"<text> {<var>}"` (Python)<br>`return \`<text> \${<var>}\`;` (TS)<br>`Ok(format!("<text> {}", <var>))` (Rust) | Auto-detects identifier interpolation |
+
+---
+
+### Before vs. After Comparison
+
+#### Traditional / Token-by-Token Dictation (24 words):
+```text
+core fetch user by id slot id form count yield strand
+test id bang pulse                       
+    flare breach user not found
+yield strand user id
+```
+
+#### Chained Intent Dictation (11-14 words — 50%+ reduction):
+```text
+fn fetch user by id with id int guard id return user id formatted
+```
+*or using Sci-Fi codewords:*
+```text
+core fetch user by id with id count to strand guard id breach user not found yield strand user id
+```
+
+#### Compiled Output (Python):
+```python
+def fetch_user_by_id(id: int) -> str:
+    if not id:
+        raise ValueError("user not found")
+    return f"user {id}"
+```
+
+#### Compiled Output (Rust):
+```rust
+fn fetch_user_by_id(id: i64) -> Result<String, Error> {
+    if id == 0 {
+        return Err(anyhow!("user not found"));
+    }
+    Ok(format!("user {}", id))
+}
+```
+
+#### Compiled Output (TypeScript):
+```typescript
+function fetchUserById(id: number): string {
+    if (!id) {
+        throw new Error("user not found");
+    }
+    return `user ${id}`;
+}
+```
+
+
